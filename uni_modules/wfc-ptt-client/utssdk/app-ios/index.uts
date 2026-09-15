@@ -195,3 +195,8 @@ export function isSpeakerEnable(): boolean {
 export function enableSpeaker(): void {
     WFPttClient.shared()!.enableSpeaker = true
 }
+
+// 仅鸿蒙需要：鸿蒙版对讲 SDK 跑在 ArkTS 侧，收不到原生消息流，得由应用层把原始 proto 消息转发过去。
+// iOS 的 WFPttClient 自己就挂在 SDK 的消息回调上，这里空实现即可。
+export function dispatchReceivedMessages(messagesJson: string, hasMore: boolean): void {
+}

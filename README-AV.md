@@ -66,8 +66,8 @@ cd uni_modules/wfc-av-client/utssdk/app-harmony/libs
 cp avenginekit.har-conference avenginekit.har
 ```
 
-> 鸿蒙版 SDK 是 ArkTS 实现的，还依赖同目录下的 `wfcclient.har`（本项目自建的 `@wfc/client` 适配层，
-> 源码在 `harmony-configs/wfcclient/`）。换 avenginekit.har 不需要动它。
+> 鸿蒙版 SDK 是 ArkTS 实现的，还依赖 `harmony-configs/libs/wfcclient.har`（本项目自建的 `@wfc/client` 适配层，
+> 和对讲插件共用，源码在 `harmony-configs/wfcclient/`）。换 avenginekit.har 不需要动它。
 
 ### iOS
 

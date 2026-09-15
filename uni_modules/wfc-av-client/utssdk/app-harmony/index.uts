@@ -6,10 +6,11 @@
  *   1. 通过 @ohos/webrtc 建 PeerConnection、收发媒体流；
  *   2. 通过硬编码的 `@wfc/client` 包收发信令消息（getUserId/sendConversationMessage/…）。
  * 本项目的 IM 层是 UTS 写的，不存在这个 ArkTS 包，因此提供了一份最小适配层
- * （libs/wfcclient.har，包名就叫 @wfc/client，底层复用 @wfc/marswrapper 同一个
+ * （wfcclient.har，包名就叫 @wfc/client，底层复用 @wfc/marswrapper 同一个
  * libmarswrapper.so 实例）。源码在 harmony-configs/wfcclient/，改完要跑那里的
  * build-har.sh 重新生成 har，详见该目录的 README.md。
- * 三个依赖都在 utssdk/app-harmony/config.json 里声明。
+ * avenginekit、webrtc 在 utssdk/app-harmony/config.json 里声明；@wfc/client 和对讲插件共用，
+ * 声明在工程根 harmony-configs/oh-package.json5 里（har 在 harmony-configs/libs/）。
  *
  * 三条链路：
  *   - 出信令：引擎 → @wfc/client 适配层 → marswrapper.sendMessage

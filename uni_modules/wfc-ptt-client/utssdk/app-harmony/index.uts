@@ -1,98 +1,137 @@
 /**
- * 语音对讲 UTS 插件（鸿蒙）—— 空实现。
+ * 对讲（PTT）UTS 插件（鸿蒙）。
  *
- * 野火目前没有提供鸿蒙版的对讲 SDK（Android 是 pttclient-release.aar，iOS 是
- * PttClient.xcframework，鸿蒙侧没有对应产物），所以这里只提供一套与
- * app-android / app-ios 同签名的空实现：
- *   - `isPttClientEnable()` 返回 false，应用层（wfc/ptt/pttClient.uts）据此隐藏/禁用对讲入口；
- *   - 其余接口保持可调用但不做事，避免鸿蒙端编译时报
- *     `Cannot find module ".../uni_modules/wfc-ptt-client"`（uts 插件缺少 app-harmony
- *     实现时，整个鸿蒙工程都编译不过，连音视频通话也一起挂掉）。
+ * 封装鸿蒙版对讲 SDK @wfc/ptt（ptt.har，取自 hm-chat 的 uikit/libs/ptt.har，源码在 ../hm-ptt 的 ptt 模块）。
+ * 协议、消息类型（21 ~ 24）、群 extra 里的配置都和 Android/iOS 一致，三端可以互通。
  *
- * 等官方出了鸿蒙版对讲 SDK，把这里换成真实实现即可，应用层不用改。
+ * 和 Android/iOS 不同，这个 SDK 是 ArkTS 实现的：
+ *   1. 依赖 @wfc/client，用的是本项目的适配层（harmony-configs/wfcclient，底层是和 UTS 侧共用的 libmarswrapper.so）；
+ *   2. 收不到原生消息回调，要由应用层 wfc/ptt/pttClient.uts 把原始消息转发给 dispatchReceivedMessages。
+ * 实现都在同目录的 pttBridge.ets，这里只做转发。
+ *
+ * 依赖：@wfc/ptt 和 @wfc/client 声明在工程根 harmony-configs/oh-package.json5 里（har 在 harmony-configs/libs/），
+ * 不在本插件的 config.json：ptt.har 还被 wfc-voice-input 用来做 AMR 编码，@wfc/client 还被 wfc-av-client 用，
+ * 插件之间看不到对方的依赖，各带一份又会装出同名的两份。
+ *
+ * 三端导出必须齐全：uts 插件走运行时 proxy，鸿蒙端少导出一个函数编译期无感，运行到才报 not a function。
  */
 
 import { PttEventListener } from '../interface.uts'
+import {
+    pttDispatchProtoMessages,
+    pttEnableSpeaker,
+    pttGetMaxSpeakCount,
+    pttGetMaxSpeakTime,
+    pttGetTalkingMemberCount,
+    pttGetTalkingMembers,
+    pttGetTalkingStartTime,
+    pttInit,
+    pttIsConversationPttSilent,
+    pttIsRecordPermissionGranted,
+    pttIsSaveVoiceMessage,
+    pttIsSpeakerEnable,
+    pttReleaseTalk,
+    pttRequestRecordPermission,
+    pttRequestTalk,
+    pttSetConversationMaxSpeakerCount,
+    pttSetConversationMaxSpeakTime,
+    pttSetConversationPttSilent,
+    pttSetEnablePtt,
+    pttSetEventListener,
+    pttSetSaveVoiceMessage
+} from './pttBridge.ets'
 
-const TAG = 'wfc-ptt-harmony'
-
-export function onPttEvent(_listener: PttEventListener): void {
+export function onPttEvent(listener: PttEventListener): void {
+    pttSetEventListener(listener)
 }
 
 export function isPttClientEnable(): boolean {
-    // 鸿蒙端暂不支持对讲
-    return false
+    return true
 }
 
-export function initClient(_options: UTSJSONObject): void {
-    console.log(TAG, '鸿蒙端暂不支持语音对讲，initClient 忽略')
+// options 字段同 app-android/index.uts#initClient
+export function initClient(options: UTSJSONObject): void {
+    pttInit(JSON.stringify(options))
 }
 
-export function requestTalk(_type: number, _target: string, _line: number, _priority: number, _onStartTalking: () => void, _onTalkingEnd: (reason: number) => void, onRequestFail: (errorCode: number) => void, _onAmplitudeUpdate: (amplitude: number) => void): void {
-    onRequestFail(-1)
+// onAmplitudeUpdate 等回调会被多次触发，和 Android/iOS 一样标 keepAlive
+@UTSJS.keepAlive
+export function requestTalk(type: number, target: string, line: number, priority: number, onStartTalking: () => void, onTalkingEnd: (reason: number) => void, onRequestFail: (errorCode: number) => void, onAmplitudeUpdate: (amplitude: number) => void): void {
+    pttRequestTalk(type, target, line, priority, onStartTalking, onTalkingEnd, onRequestFail, onAmplitudeUpdate)
 }
 
-export function releaseTalking(_type: number, _target: string, _line: number): void {
+export function releaseTalking(type: number, target: string, line: number): void {
+    pttReleaseTalk(type, target, line)
 }
 
-export function getMaxSpeakCount(_type: number, _target: string, _line: number): number {
-    return 0
+export function getMaxSpeakCount(type: number, target: string, line: number): number {
+    return pttGetMaxSpeakCount(type, target, line)
 }
 
-export function getMaxSpeakTime(_type: number, _target: string, _line: number): number {
-    return 0
+export function getMaxSpeakTime(type: number, target: string, line: number): number {
+    return pttGetMaxSpeakTime(type, target, line)
 }
 
-export function isSaveVoiceMessage(_type: number, _target: string, _line: number): boolean {
-    return false
+export function isSaveVoiceMessage(type: number, target: string, line: number): boolean {
+    return pttIsSaveVoiceMessage(type, target, line)
 }
 
-export function setSaveVoiceMessage(_type: number, _target: string, _line: number, _save: boolean, _successCB: () => void, failCB: (error: number) => void): void {
-    failCB(-1)
+export function setSaveVoiceMessage(type: number, target: string, line: number, save: boolean, successCB: () => void, failCB: (error: number) => void): void {
+    pttSetSaveVoiceMessage(type, target, line, save, successCB, failCB)
 }
 
-export function setConversationMaxSpeakTime(_type: number, _target: string, _line: number, _duration: number, _successCB: () => void, failCB: (error: number) => void): void {
-    failCB(-1)
+export function setConversationMaxSpeakTime(type: number, target: string, line: number, duration: number, successCB: () => void, failCB: (error: number) => void): void {
+    pttSetConversationMaxSpeakTime(type, target, line, duration, successCB, failCB)
 }
 
-export function setConversationMaxSpeakerCount(_type: number, _target: string, _line: number, _count: number, _successCB: () => void, failCB: (error: number) => void): void {
-    failCB(-1)
+export function setConversationMaxSpeakerCount(type: number, target: string, line: number, count: number, successCB: () => void, failCB: (error: number) => void): void {
+    pttSetConversationMaxSpeakerCount(type, target, line, count, successCB, failCB)
 }
 
-export function setConversationPttSilent(_type: number, _target: string, _line: number, _silent: boolean, _successCB: () => void, failCB: (error: number) => void): void {
-    failCB(-1)
+export function setConversationPttSilent(type: number, target: string, line: number, silent: boolean, successCB: () => void, failCB: (error: number) => void): void {
+    pttSetConversationPttSilent(type, target, line, silent, successCB, failCB)
 }
 
-export function isConversationPttSilent(_type: number, _target: string, _line: number): boolean {
-    return false
+export function isConversationPttSilent(type: number, target: string, line: number): boolean {
+    return pttIsConversationPttSilent(type, target, line)
 }
 
 export function getTalkingStartTime(): number {
-    return 0
+    return pttGetTalkingStartTime()
 }
 
-export function getTalkingMembers(_type: number, _target: string, _line: number): string {
-    return '[]'
+export function getTalkingMembers(type: number, target: string, line: number): string {
+    return pttGetTalkingMembers(type, target, line)
 }
 
-export function getTalkingMemberCount(_type: number, _target: string, _line: number): number {
-    return 0
+export function getTalkingMemberCount(type: number, target: string, line: number): number {
+    return pttGetTalkingMemberCount(type, target, line)
 }
 
-export function setEnablePtt(_type: number, _target: string, _line: number, _enable: boolean): void {
+export function setEnablePtt(type: number, target: string, line: number, enable: boolean): void {
+    pttSetEnablePtt(type, target, line, enable)
 }
 
 export function isRecordPermissionGranted(): boolean {
-    return false
+    return pttIsRecordPermissionGranted()
 }
 
-export function requestRecordPermission(_successCB: () => void, failCB: () => void): void {
-    failCB()
+export function requestRecordPermission(successCB: () => void, failCB: () => void): void {
+    pttRequestRecordPermission(successCB, failCB)
 }
 
 export function isSpeakerEnable(): boolean {
-    return false
+    return pttIsSpeakerEnable()
 }
 
 export function enableSpeaker(): void {
+    pttEnableSpeaker()
+}
+
+/**
+ * 由应用层 wfc/ptt/pttClient.uts 在收到 EventType.ReceiveProtoMessages 时调用，
+ * 把原始 proto 消息喂给对讲 SDK。Android/iOS 上是空实现（原生 SDK 自己就挂在消息流上）。
+ */
+export function dispatchReceivedMessages(messagesJson: string, hasMore: boolean): void {
+    pttDispatchProtoMessages(messagesJson, hasMore)
 }

@@ -7,6 +7,7 @@ import Conversation from '../model/conversation.uts'
 import PttEventListener from './pttEventListener.uts'
 import TalkingCallback from './talkingCallback.uts'
 import Config from '../../config.uts'
+import { onReceiveProtoMessages } from '../client/wfcEventSubscriber.uts'
 
 function parseArgs(argsJson: string): Array<any | null> {
     const arr = JSON.parseArray(argsJson)
@@ -46,6 +47,11 @@ class PttClient {
         native.initClient(options)
         native.onPttEvent((event: string, conversationJson: string, argsJson: string) => {
             this._handlePttEvent(event, conversationJson, argsJson)
+        })
+        // 鸿蒙端对讲 SDK 在 ArkTS 侧，拿不到原生消息回调，别人的实时语音要靠这里转发过去；
+        // Android/iOS 的 dispatchReceivedMessages 是空实现。
+        onReceiveProtoMessages((messagesStr: string, hasMore: boolean) => {
+            native.dispatchReceivedMessages(messagesStr, hasMore)
         })
     }
 

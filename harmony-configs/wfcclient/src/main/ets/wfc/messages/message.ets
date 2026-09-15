@@ -21,14 +21,21 @@ import JoinCallRequestMessageContent from '../av/messages/joinCallRequestMessage
 import ConferenceChangeModeContent from '../av/messages/conferenceChangeModeContent';
 import ConferenceKickoffMemberMessageContent from '../av/messages/conferenceKickoffMemberMessageContent';
 
+import MessageConfig from '../client/messageConfig';
+
 const TAG = 'wfc-client-shim';
 
 /**
- * 只注册 avenginekit 会处理的 voip 消息类型。其余类型（文本、图片、通知……）由 UTS 侧的
- * wfc.uts 负责解码，本适配层用基类 MessageContent 占位即可——avenginekit 的
- * onReceiveMessage 只按 messageContent.type 分支，命中不了就直接忽略。
+ * 先问 MessageConfig 里注册的工厂（@wfc/ptt 在 init 时认领 21 ~ 24 这 4 种对讲消息），
+ * 再看 avenginekit 会处理的 voip 消息。其余类型（文本、图片、通知……）由 UTS 侧的
+ * wfc.uts 负责解码，本适配层用基类 MessageContent 占位即可——avenginekit 和 @wfc/ptt 的
+ * onReceiveMessage 都只按 messageContent.type 分支，命中不了就直接忽略。
  */
 function createMessageContent(type: number): MessageContent {
+    const extension = MessageConfig.newExtensionMessageContent(type);
+    if (extension) {
+        return extension;
+    }
     switch (type) {
         case MessageContentType.VOIP_CONTENT_TYPE_START:
             return new CallStartMessageContent();

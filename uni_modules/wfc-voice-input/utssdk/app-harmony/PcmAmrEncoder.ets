@@ -5,7 +5,8 @@
 // 移植自 ../hm-chat uikit/src/main/ets/pages/conversation/audio/PcmAmrEncoder.ets。
 // hm-chat 直接 import 'libpttamr.so'，要在工程里另外声明 .so 的类型包；uts 插件的 oh-package 只能写 dependencies，
 // 类型包是源码目录、解析不到。这里改用 ptt.har 自己封装好的 AmrEncoder：.so 的解析发生在 har 内部，
-// 插件只需要依赖 har（har 可以全局解析）。编码参数和 hm-chat 一致：12.2kbps（AmrEncoder 内部固定 MR122）。
+// 插件只需要依赖 har。编码参数和 hm-chat 一致：12.2kbps（AmrEncoder 内部固定 MR122）。
+// ptt.har 和 wfc-ptt-client 共用，声明在工程根 harmony-configs/oh-package.json5 里（har 在 harmony-configs/libs/）。
 
 import fs from '@ohos.file.fs'
 import { AmrEncoder } from '@wfc/ptt/src/main/ets/ptt/internal/amrCodec'

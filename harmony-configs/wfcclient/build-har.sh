@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 #
 # 把本目录的源码打包成 wfcclient.har，输出到
-# uni_modules/wfc-av-client/utssdk/app-harmony/libs/wfcclient.har
+# harmony-configs/libs/wfcclient.har
 #
 # 为什么要打成 har 而不是直接当源码模块用：
 # 鸿蒙工程开了 useNormalizedOHMUrl 之后，**源码模块**必须被引用方在自己的
 # oh-package.json5 里显式声明才能解析；而 uts 插件生成的 oh-package.json5 只能通过
 # utssdk/app-harmony/config.json 配置，且 config.json 里的相对路径会被限制在插件目录内，
-# 指不到 harmony-configs 下的源码模块。**har 依赖**则没有这个限制（放在插件 libs/ 下即可，
-# 且 avenginekit.har 内部 `import '@wfc/client/...'` 也能解析到）。
+# 指不到 harmony-configs 下的源码模块。**har 依赖**则没有这个限制
+# （avenginekit.har / ptt.har 内部 `import '@wfc/client/...'` 也能解析到）。
+#
+# 为什么输出到 harmony-configs/libs：wfc-av-client 和 wfc-ptt-client 都要用它，
+# 在工程根 harmony-configs/oh-package.json5 里声明一份，详见 README.md。
 #
 # 用法：./build-har.sh
 # 依赖：DevEco-Studio（提供 node / hvigor / ohpm / SDK）
@@ -17,7 +20,7 @@ set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SRC_DIR/../.." && pwd)"
-OUT_DIR="$PROJECT_ROOT/uni_modules/wfc-av-client/utssdk/app-harmony/libs"
+OUT_DIR="$PROJECT_ROOT/harmony-configs/libs"
 
 DEVECO="/Applications/DevEco-Studio.app/Contents"
 export DEVECO_SDK_HOME="$DEVECO/sdk"

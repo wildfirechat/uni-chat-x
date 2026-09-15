@@ -3,7 +3,7 @@
   "name": "野火IM对讲插件(UTS)",
   "displayName": "野火IM对讲插件(UTS)",
   "version": "0.1.0",
-  "description": "基于 pttclient-release.aar / PttClient.xcframework 为 uni-app x 重新封装的对讲（PTT）UTS 插件，官方目前未发布对应的 UTS 版本，此为项目内自建实现。",
+  "description": "基于 pttclient-release.aar / PttClient.xcframework / ptt.har（鸿蒙 ArkTS 版，依赖工程根的 @wfc/client 适配层）为 uni-app x 重新封装的对讲（PTT）UTS 插件，官方目前未发布对应的 UTS 版本，此为项目内自建实现。",
   "keywords": [
     "IM",
     "对讲",

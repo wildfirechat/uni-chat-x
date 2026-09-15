@@ -1,7 +1,7 @@
 {
   "name": "@wfc/client",
   "version": "1.0.0",
-  "description": "野火IM 鸿蒙端 @wfc/client 适配层，仅供 @wfc/avenginekit 使用，详见 README.md",
+  "description": "野火IM 鸿蒙端 @wfc/client 适配层，仅供 @wfc/avenginekit、@wfc/ptt 使用，详见 README.md",
   "main": "Index.ets",
   "author": "",
   "license": "Apache-2.0",
