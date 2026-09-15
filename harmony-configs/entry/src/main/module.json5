@@ -54,6 +54,13 @@
          }
       },
       {
+        // 按住说话时的触感反馈（uni_modules/wfc-voice-input）
+        "name": "ohos.permission.VIBRATE",
+        "usedScene": {
+          "when": "inuse"
+        }
+      },
+      {
         "name": "ohos.permission.CAMERA",
         "reason": "$string:reason_camera",
         "usedScene": {

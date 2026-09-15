@@ -572,6 +572,23 @@ export default {
         "success": "轉文字成功",
         "audio_not_available": "音頻文件不可用"
     },
+    "voice_input": {
+        "voice": "語音",
+        "release_to_send": "鬆開 發送",
+        "cancel": "取消",
+        "release_to_cancel": "鬆手 取消",
+        "slide_to_text": "滑到這裡 轉文字",
+        "release_to_edit": "鬆手 編輯文字",
+        "send_voice": "發送原語音",
+        "send": "發送",
+        "no_text": "未識別到文字",
+        "recognize_failed": "轉文字失敗",
+        "count_down": "%d 秒後將停止錄音",
+        "too_short": "說話時間太短",
+        "record_failed": "錄音失敗",
+        "asr_error": "語音識別錯誤: ",
+        "mic_permission_denied": "請授予麥克風權限"
+    },
     "audio": {
         "play_mode_speaker": "揚聲器播放",
         "play_mode_earpiece": "聽筒播放",

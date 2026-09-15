@@ -47,6 +47,16 @@ export default class Config {
     // 置空则消息长按菜单不显示「语音转文字」。
     static ASR_SERVER = 'https://app.wildfirechat.net/asr/api/recognize';
 
+    // 实时语音输入服务地址（asr-api 的实时识别接口）。配置后输入框右侧显示麦克风按钮，按住说话时也可以滑到「转文字」；置空则关闭。
+    // 连接时会在 header authCode 里带上 IM 认证码，由 asr-api 校验。内网测试也可以直连 wf-voice（如 ws://192.168.1.100:12436），
+    // wf-voice 本身没有鉴权、不支持 wss，请勿暴露到公网。
+    // 野火提供的测试服务会记录语音和识别出的文字，上线请部署自己的服务，参考 https://gitee.com/wfchat/asr-api
+    // 目前只有鸿蒙端实现了（uni_modules/wfc-voice-input），Android / iOS 配了也不生效。
+    static ASR_STREAM_SERVER = 'wss://app.wildfirechat.net/asr/api/stream';
+
+    // 实时语音输入是否边说边出字。关闭时每说完一句才显示这句话；开启后服务端 CPU 占用更高，旧版 wf-voice 不支持（效果同关闭）。
+    static ENABLE_ASR_PARTIAL_RESULT = true;
+
     // 群接龙服务地址。独立服务，不走 IM 协议栈，鉴权走 getAuthCode（见 api/authCodeApiClient.uts）。
     // 置空则群聊输入框的扩展面板不显示「群接龙」入口，接龙消息气泡也不再可点。
     static COLLECTION_SERVER = 'https://jielong.wildfirechat.net';

@@ -1,11 +1,12 @@
 <template>
-    <view class="TUI-message-input-main" @longpress="handleLongPress" @touchmove="handleTouchMove"
+    <view class="TUI-message-input-main" @touchstart="handleTouchStart" @longpress="handleLongPress" @touchmove="handleTouchMove"
         @touchend="handleTouchEnd" @touchcancel="handleTouchCancel">
-        <view class="record-button" :style="{ backgroundColor: buttonBg, borderColor: buttonBorder }">
+        <view ref="recordButtonEl" class="record-button"
+            :style="{ backgroundColor: buttonBg, borderColor: buttonBorder, transform: holdPressed ? 'scale(0.95)' : 'scale(1)' }">
             <text class="record-text" :style="{ fontSize: fontPx(15), color: buttonFg }">{{ buttonLabel }}</text>
         </view>
-        <!-- 语音消息没有真实音量可读，只能让 HUD 自己造起伏，理由见 voice-record-overlay 文件头 -->
-        <voice-record-overlay :visible="recording" :simulate-level="true" :cancelling="cancelling"
+        <!-- 原生浮层可用时不挂这个 HUD。语音消息没有真实音量可读，只能让 HUD 自己造起伏，理由见 voice-record-overlay 文件头 -->
+        <voice-record-overlay v-if="!nativeHold" :visible="recording" :simulate-level="true" :cancelling="cancelling"
             :seconds="recordSeconds" :max-seconds="MAX_RECORD_SECONDS" :tip="tip" />
     </view>
 </template>
@@ -14,10 +15,13 @@
 import wfc from "../../../wfc/client/wfc.uts";
 import ConversationInfo from "../../../wfc/model/conversationInfo.uts";
 import SoundMessageContent from "../../../wfc/messages/soundMessageContent.uts";
+import TextMessageContent from "../../../wfc/messages/textMessageContent.uts";
 import { toLocalFilePath } from "../../../common/filePath.uts";
-import { getTouchPoint, TouchPoint } from "../../../common/touch.uts";
+import { getTouchPoint, getTouchScreenPoint, getElementScreenRect, TouchPoint, ScreenRect } from "../../../common/touch.uts";
 import { setRecorderHandlers } from "../../../common/recorder.uts";
 import { toast } from "../../../common/prompt.uts";
+import { isNativeHoldToTalkAvailable, holdTouchDown, holdTouchMove, holdTouchUp, dismissHoldToTalk, REASON_USER_CANCELED } from "../../../common/voiceInput.uts";
+import { t } from "../../../i18n/i18n.uts";
 
 import { colors, AppColors } from "@/common/theme.uts";
 import { fontPx } from "@/common/layoutScale.uts";
@@ -30,13 +34,16 @@ const MAX_RECORD_SECONDS = 60
 /**
  * 上滑多少**逻辑像素**算取消。
  *
- * ⚠️ 判定必须走 [getTouchPoint]：touch 事件的坐标在鸿蒙上是物理像素、在 android 上是逻辑像素
- * （见 common/touch.uts）。以前这里直接读 `changedTouches[0].clientY`，同一个 100 的阈值
- * 在 3x 屏的鸿蒙上只有 33 逻辑像素，两端的取消手感差着三倍。
+ * ⚠️ 判定必须走 [getTouchPoint]：起点来自 longpress、当前点来自 touchmove，两者的坐标单位在鸿蒙上不一样
+ * （longpress 是物理像素、touchmove 已经是逻辑像素，见 common/touch.uts），直接读 clientY 相减没有意义。
  */
 const CANCEL_SLIDE_DISTANCE = 50
 /** 计时刷新间隔，秒数和倒计时都靠它推进 */
 const TICK_MS = 200
+/** 按钮高度，和样式里的 .record-button 一致。拿不到节点矩形时，按手指在按钮中间估算按钮上边缘 */
+const BUTTON_HEIGHT = 33
+/** 发出语音消息的音效，对齐 android-chat / hm-chat */
+const SEND_SOUND = '/static/audios/audido_msg_send_success.mp3'
 
 const TIP_NORMAL = '手指上滑，取消发送'
 const TIP_CANCEL = '松开手指，取消发送'
@@ -45,6 +52,16 @@ const c = computed<AppColors>((): AppColors => colors())
 const props = defineProps<{
     conversationInfo: ConversationInfo
 }>()
+
+/**
+ * 按住说话是否走插件的原生浮层（仿微信：松开发送、滑到「取消」、滑到「转文字」），对齐 android-chat / hm-chat。
+ * 浮层、录音、识别都在 uni_modules/wfc-voice-input 里，这里只把触摸坐标转发过去、收结果发消息。
+ * 插件不支持时（iOS 13 以下）保留下面原来的长按 + HUD + recorder。
+ */
+const nativeHold = isNativeHoldToTalkAvailable()
+/** 原生浮层模式下手指是否按着，只用来画按钮的按下态 */
+const holdPressed = ref<boolean>(false)
+const recordButtonEl = ref<UniElement | null>(null)
 
 /** 正在录音（HUD 是否显示、手势是否有效） */
 const recording = ref<boolean>(false)
@@ -71,8 +88,11 @@ const buttonLabel = computed<string>((): string => {
 const tip = computed<string>((): string => cancelling.value ? TIP_CANCEL : TIP_NORMAL)
 
 // 三态和 flutter record_widget.dart 一致：静止时对齐它替换掉的文本输入框（surface 底 + 发丝描边），
-// 录音中转品牌蓝，上滑待取消转危险红。
+// 录音中转品牌蓝，上滑待取消转危险红。原生浮层模式下录音状态都在浮层上，按钮只有按下态（对齐 android-chat）。
 const buttonBg = computed<string>((): string => {
+    if (holdPressed.value) {
+        return c.value.cellPressed
+    }
     if (!recording.value) {
         return c.value.surface
     }
@@ -90,6 +110,70 @@ const buttonFg = computed<string>((): string => {
     return recording.value ? c.value.onAccent : c.value.textPrimary
 })
 
+// ---- 原生浮层 ----
+
+const playSendSound = () => {
+    const audio = uni.createInnerAudioContext()
+    audio.autoplay = false
+    audio.src = SEND_SOUND
+    audio.onCanplay(() => {
+        audio.play()
+    })
+    audio.onEnded(() => {
+        audio.destroy()
+    })
+    audio.onError((res) => {
+        console.log('play send sound error', res)
+        audio.destroy()
+    })
+}
+
+/** 按钮上边缘的页面坐标（和 getTouchPoint 同一个坐标系）。浮层的底部弧形区域要盖住按钮，手指按下时就在「松开 发送」区域内 */
+const buttonTopFor = (probe: TouchPoint): number => {
+    const el = recordButtonEl.value
+    if (el != null) {
+        const rect = getElementScreenRect(el as UniElement, probe)
+        if (rect != null) {
+            return (rect as ScreenRect).y
+        }
+    }
+    // 鸿蒙 dom2 上常拿不到可信的节点矩形（见 common/touch.uts）：按手指在按钮中间估算，误差不超过半个按钮高
+    return probe.y - BUTTON_HEIGHT / 2
+}
+
+const onHoldRecordSuccess = (audioFile: string, duration: number): void => {
+    playSendSound()
+    const soundMessageContent = new SoundMessageContent(toLocalFilePath(audioFile), '', duration)
+    const conversationInfo = props.conversationInfo as ConversationInfo
+    wfc.sendConversationMessage(conversationInfo.conversation, soundMessageContent)
+}
+
+const onHoldRecordFail = (reason: string): void => {
+    // 用户主动取消不提示
+    if (reason != REASON_USER_CANCELED) {
+        toast(reason)
+    }
+}
+
+const onHoldSendText = (text: string): void => {
+    const conversationInfo = props.conversationInfo as ConversationInfo
+    wfc.sendConversationMessage(conversationInfo.conversation, new TextMessageContent(text))
+}
+
+const onHoldPermissionDenied = (): void => {
+    toast(t('voice_input.mic_permission_denied'))
+}
+
+const releaseHold = () => {
+    if (!holdPressed.value) {
+        return
+    }
+    holdPressed.value = false
+    holdTouchUp()
+}
+
+// ---- 原来的长按 + HUD ----
+
 const stopTick = () => {
     if (tickTimer != 0) {
         clearInterval(tickTimer)
@@ -106,6 +190,9 @@ const resetHud = () => {
 }
 
 onMounted(() => {
+    if (nativeHold) {
+        return
+    }
     // 监听为什么不在这里直接 onStop/onError：见 common/recorder.uts 的说明（单例 + 追加监听）
     const onStop = (tempFilePath: string): void => {
         const startedAt = recordStartTime
@@ -143,6 +230,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+    if (nativeHold) {
+        // 组件是跟着输入栏开关销毁的：浮层、录音、识别一并停掉，不发消息
+        holdPressed.value = false
+        dismissHoldToTalk()
+        return
+    }
     if (recording.value) {
         // 组件是跟着输入栏开关销毁的，销毁时还在录就把 recorder 停掉，否则麦克风一直占着。
         // 这种半路销毁不发消息 —— 用户是去点别的按钮了，不是想发这条语音
@@ -154,8 +247,25 @@ onUnmounted(() => {
     setRecorderHandlers(null, null)
 })
 
+// 原生浮层和 android-chat 一样按下就开始录音；原来的 HUD 仍然是长按才开始
+const handleTouchStart = (e: UniTouchEvent) => {
+    if (!nativeHold) {
+        return
+    }
+    const point = getTouchPoint(e)
+    const screenPoint = getTouchScreenPoint(e)
+    if (point == null || screenPoint == null) {
+        return
+    }
+    const p = point as TouchPoint
+    const s = screenPoint as TouchPoint
+    holdPressed.value = true
+    // 插件要的是屏幕坐标：按钮上边缘按页面坐标量出来，再平移「屏幕坐标 - 页面坐标」这段偏移（鸿蒙上两者相同，偏移为 0）
+    holdTouchDown(s.x, s.y, buttonTopFor(p) + (s.y - p.y), onHoldRecordSuccess, onHoldRecordFail, onHoldSendText, onHoldPermissionDenied)
+}
+
 const handleLongPress = (e: UniTouchEvent) => {
-    if (recording.value) {
+    if (nativeHold || recording.value) {
         return
     }
     const point = getTouchPoint(e)
@@ -183,6 +293,16 @@ const handleLongPress = (e: UniTouchEvent) => {
 
 // 上滑超过阈值进入取消态，滑回来还能恢复（和微信一致）
 const handleTouchMove = (e: UniTouchEvent) => {
+    if (nativeHold) {
+        if (!holdPressed.value) {
+            return
+        }
+        const point = getTouchScreenPoint(e)
+        if (point != null) {
+            holdTouchMove((point as TouchPoint).x, (point as TouchPoint).y)
+        }
+        return
+    }
     if (!recording.value) {
         return
     }
@@ -195,6 +315,10 @@ const handleTouchMove = (e: UniTouchEvent) => {
 }
 
 const handleTouchEnd = () => {
+    if (nativeHold) {
+        releaseHold()
+        return
+    }
     if (!recording.value) {
         return
     }
@@ -206,6 +330,13 @@ const handleTouchEnd = () => {
 
 // 来电、系统手势等会把手势打断，按取消处理，别把半截录音发出去
 const handleTouchCancel = () => {
+    if (nativeHold) {
+        // 原生侧和 android-chat 一样，按手指当前所在的目标结束。
+        // 打一行日志：如果浮层弹出时框架把手势打断了，这行会紧跟着按下出现，表现是一按就结束
+        console.log('AudioInputView hold touchcancel')
+        releaseHold()
+        return
+    }
     if (!recording.value) {
         return
     }
@@ -237,6 +368,8 @@ const handleTouchCancel = () => {
     flex-direction: row;
     align-items: center;
     justify-content: center;
+    transition-property: transform;
+    transition-duration: 100ms;
 }
 
 .record-text {

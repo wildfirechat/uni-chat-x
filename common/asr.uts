@@ -5,11 +5,30 @@
  * **不走 IM 协议栈，也不需要动原生插件** —— 客户端把语音消息的 remoteUrl POST 给
  * [Config.ASR_SERVER]，服务端按 SSE（`data: xxx` 逐行）把识别结果吐回来。
  *
+ * ## 鉴权
+ *
+ * asr-api 要求请求头 `authCode` 带上从 IM 服务换来的认证码，asr-api 拿它向 IM 服务校验出用户 ID。
+ * 对齐 android-chat `asr/AsrAuth.java`：和组织通讯录一样用管理后台类型的认证码（appId `admin`、
+ * type 2）。认证码 1 分钟内有效，每次请求前重新换，不缓存。
+ *
  * 与 flutter 的一处差异：flutter 用 `http.Request.send()` 拿到流，边收边把片段拼进气泡；
  * uni-app x 的 `uni.request` 没有流式回调，只能等整个响应体到齐再一次性解析，
  * 所以转写结果是**一次性出现**而不是逐字蹦出来。对短语音（≤60s）观感差别不大。
  */
 import Config from "../config.uts";
+import wfc from "../wfc/client/wfc.uts";
+
+/** getAuthCode 的 appId，asr-api 认的是管理后台类型 */
+const AUTH_CODE_APP_ID = 'admin'
+/** getAuthCode 的 appType，管理后台类型（ApplicationType_Admin） */
+const AUTH_CODE_TYPE = 2
+
+/**
+ * 换一个 asr-api 用的认证码。实时语音输入（common/voiceInput.uts）连 WebSocket 前也走这里。
+ */
+export function getAsrAuthCode(successCB: (authCode: string) => void, failCB: (err: number) => void): void {
+    wfc.getAuthCode(AUTH_CODE_APP_ID, AUTH_CODE_TYPE, Config.IM_SERVER_HOST, successCB, failCB)
+}
 
 /** ASR 是否可用。服务地址置空时，消息长按菜单里不显示「语音转文字」。 */
 export function isAsrEnabled(): boolean {
@@ -43,38 +62,44 @@ function parseSseText(body: string): string {
  *
  * @param audioUrl 语音消息的 remoteUrl
  * @param successCB 识别出的文本（可能为空串，表示服务端没识别出内容）
- * @param failCB 网络或服务端错误
+ * @param failCB 换认证码失败、网络或服务端错误
  */
 export function speechToText(audioUrl: string, successCB: ((text: string) => void) | null, failCB: ((err: string) => void) | null): void {
     if (!isAsrEnabled()) {
         failCB?.('asr server not configured')
         return
     }
-    uni.request<string>({
-        url: Config.ASR_SERVER,
-        method: 'POST',
-        // 响应是 SSE 文本，不是 JSON，必须按文本收，否则各端解析行为不一致
-        responseType: 'text',
-        header: {
-            'content-type': 'application/json',
-            'Accept': '*/*'
-        } as UTSJSONObject,
-        data: {
-            url: audioUrl,
-            noReuse: false,
-            noLlm: false
-        } as UTSJSONObject,
-        success: (res) => {
-            if (res.statusCode < 200 || res.statusCode >= 300) {
-                console.log('asr request error, status code', res.statusCode)
-                failCB?.('status code ' + res.statusCode)
-                return
+    getAsrAuthCode((authCode: string) => {
+        uni.request<string>({
+            url: Config.ASR_SERVER,
+            method: 'POST',
+            // 响应是 SSE 文本，不是 JSON，必须按文本收，否则各端解析行为不一致
+            responseType: 'text',
+            header: {
+                'content-type': 'application/json',
+                'Accept': '*/*',
+                'authCode': authCode
+            } as UTSJSONObject,
+            data: {
+                url: audioUrl,
+                noReuse: false,
+                noLlm: false
+            } as UTSJSONObject,
+            success: (res) => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    console.log('asr request error, status code', res.statusCode)
+                    failCB?.('status code ' + res.statusCode)
+                    return
+                }
+                successCB?.(parseSseText(res.data ?? ''))
+            },
+            fail: (err) => {
+                console.log('asr request fail', err)
+                failCB?.(err.errMsg)
             }
-            successCB?.(parseSseText(res.data ?? ''))
-        },
-        fail: (err) => {
-            console.log('asr request fail', err)
-            failCB?.(err.errMsg)
-        }
-    } as RequestOptions<string>)
+        } as RequestOptions<string>)
+    }, (err: number) => {
+        console.log('asr getAuthCode fail', err)
+        failCB?.('get auth code failed: ' + err)
+    })
 }

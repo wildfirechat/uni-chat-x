@@ -35,7 +35,7 @@
  *
  * ## 坐标单位
  *
- * touch 的 clientX/clientY 在鸿蒙上是**物理像素**，节点布局尺寸是逻辑像素，两者不能直接相减，
+ * 触点坐标的单位在鸿蒙上随事件类型变（touch 系列是逻辑像素、longpress 是物理像素），
  * 所有触点一律先过 [getTouchPoints] 归一化，见 common/touch.uts 的说明。
  */
 import { PreviewMediaItem } from "@/store.uts";

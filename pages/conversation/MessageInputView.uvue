@@ -19,12 +19,19 @@
                 </view>
                 <view v-else class="wf-input-middle">
                     <view class="wf-input-text-container" :style="{ backgroundColor: c.surface }">
-                        <!-- cursor 必须写在 value 后面：同一次 patch 里属性是按模板顺序下发的，
-                             先 setText(会把光标带到别处)、后 setSelection 才是我们要的位置 -->
-                        <textarea class="wf-input-textarea" :style="{ backgroundColor: c.surface, color: c.textPrimary }" @focus="onInputFocus" @input="onInput" :value="text"
-                            :cursor="inputCursor"
-                            placeholder="" :hold-keyboard="true" confirm-type="send" @confirm="send" :maxlength="-1"
-                            :auto-height="true" :adjust-position="adjustPosition" @linechange="onLineChange" />
+                        <view class="wf-input-text-row">
+                            <!-- cursor 必须写在 value 后面：同一次 patch 里属性是按模板顺序下发的，
+                                 先 setText(会把光标带到别处)、后 setSelection 才是我们要的位置 -->
+                            <textarea class="wf-input-textarea" :style="{ backgroundColor: c.surface, color: c.textPrimary }" @focus="onInputFocus" @blur="onInputBlur" @input="onInput" :value="text"
+                                :cursor="inputCursor" :focus="inputFocus"
+                                placeholder="" :hold-keyboard="true" confirm-type="send" @confirm="send" :maxlength="-1"
+                                :auto-height="true" :adjust-position="adjustPosition" @linechange="onLineChange" />
+                            <!-- 实时语音输入：点一下开始边说边出字，再点一下停止。对齐 android-chat 输入框右侧的 asrImageView；
+                                 录音时主色调闪烁，停止后等剩余识别结果时保持主色调 -->
+                            <view v-if="asrInputAvailable" class="wf-asr-mic" @tap="onAsrMicTap">
+                                <text class="wf-asr-mic-icon icomoon" :style="{ color: asrMicColor, opacity: asrMicOpacity }">&#xf461;</text>
+                            </view>
+                        </view>
                     </view>
                     <view v-if="quotedMessage != null" class="quote-message-container" :style="{ backgroundColor: c.bubbleQuoted }">
                         <text class="quoted-message single-line" :style="{ fontSize: fontPx(13), color: c.bubbleQuotedText }">{{ quotedMessageDigest }}</text>
@@ -128,6 +135,7 @@ import ChannelMenu from "../../wfc/model/channelMenu.uts";
 import ChannelMenuEventMessageContent from "../../wfc/messages/channelMenuEventMessageContent.uts";
 import { ChannelMenuSelectEvent, CHANNEL_MENU_TYPE_VIEW, CHANNEL_MENU_TYPE_CLICK } from "../../common/channelMenu.uts";
 import { PopupMenuItem } from "../../common/popupMenu.uts";
+import { isAsrInputAvailable, startAsr as startVoiceAsr, stopAsr as stopVoiceAsr, cancelAsr as cancelVoiceAsr, isAsrRecognizing as isVoiceAsrRecognizing } from "../../common/voiceInput.uts";
 
 import { colors, AppColors } from "@/common/theme.uts";
 import { fontPx, iconPx, scale, TEXT_CAP } from "@/common/layoutScale.uts";
@@ -258,6 +266,127 @@ const moveCursorTo = (pos: number) => {
     })
     // #endif
 }
+
+// ---- 实时语音输入（输入框右侧麦克风）----
+// 对齐 android-chat ConversationInputPanel 的 asrImageView / hm-chat ConversationInputPanelView：
+// 点一下开始录音，识别结果边说边写进输入框（写在开始时的光标处），再点一下停止并等剩余结果；
+// 期间用户自己编辑文本、发送、切到语音/对讲，都会结束语音输入，已经写进去的文字保留。
+// 录音、识别都在 uni_modules/wfc-voice-input 里，入口见 common/voiceInput.uts。
+const asrInputAvailable = isAsrInputAvailable()
+/** 正在录音：麦克风主色调闪烁 */
+const asrRecording = ref<boolean>(false)
+/** 已停止录音、等待剩余识别结果：麦克风保持主色调 */
+const asrWaiting = ref<boolean>(false)
+/** 闪烁时的透明度，定时器在 1 和 0.3 之间切换，渐变交给样式里的 transition */
+const asrMicOpacity = ref<number>(1)
+const asrMicColor = computed<string>((): string => {
+    return asrRecording.value || asrWaiting.value ? c.value.accent : c.value.iconSecondary
+})
+/** textarea 的 focus 属性。开始语音输入时置 true 让输入框获焦、弹出键盘，失焦时复位，下次才能再触发 */
+const inputFocus = ref<boolean>(false)
+let asrPulseTimer = 0
+// 识别结果写到 [asrTextStart, asrTextEnd)，每次用最新的全部识别文本覆盖这一段
+let asrTextStart = 0
+let asrTextEnd = 0
+// 最近一次写入识别结果后的文本，用来区分用户自己的编辑
+let asrExpectedText = ''
+// textarea 没有读取选区的接口，光标只能从 input / blur 事件里记
+let lastCursor = -1
+let inputFocused = false
+let lastBlurTime = 0
+
+const stopAsrPulse = () => {
+    if (asrPulseTimer != 0) {
+        clearInterval(asrPulseTimer)
+        asrPulseTimer = 0
+    }
+    asrMicOpacity.value = 1
+}
+
+const startAsrPulse = () => {
+    stopAsrPulse()
+    asrPulseTimer = setInterval((): void => {
+        asrMicOpacity.value = asrMicOpacity.value > 0.5 ? 0.3 : 1
+    }, 600)
+}
+
+const resetAsrState = () => {
+    asrRecording.value = false
+    asrWaiting.value = false
+    stopAsrPulse()
+}
+
+/** 用最新的识别文本替换输入框里语音输入的那一段，光标移到识别文本末尾 */
+const updateAsrText = (result: string) => {
+    const current = text.value
+    const start = Math.min(asrTextStart, current.length)
+    const end = Math.min(Math.max(asrTextEnd, start), current.length)
+    const newText = current.substring(0, start) + result + current.substring(end)
+    asrTextStart = start
+    asrTextEnd = start + result.length
+    asrExpectedText = newText
+    text.value = newText
+    lastCursor = asrTextEnd
+    moveCursorTo(asrTextEnd)
+}
+
+/** 取消语音输入，丢弃还没返回的识别结果，已经写进输入框的文字保留 */
+const cancelAsrInput = () => {
+    if (!asrRecording.value && !asrWaiting.value) {
+        return
+    }
+    cancelVoiceAsr()
+    resetAsrState()
+}
+
+const startAsrInput = () => {
+    const length = text.value.length
+    // 写在开始时的光标处；输入框没有焦点时写到末尾。点麦克风本身可能先让输入框失焦，所以刚失焦的也算
+    const focused = inputFocused || Date.now() - lastBlurTime < 500
+    const cursor = focused && lastCursor >= 0 && lastCursor <= length ? lastCursor : length
+    asrTextStart = cursor
+    asrTextEnd = cursor
+    asrExpectedText = text.value
+    asrRecording.value = true
+    asrWaiting.value = false
+    startAsrPulse()
+    inputFocus.value = true
+    startVoiceAsr((result: string): void => {
+        updateAsrText(result)
+    }, (result: string): void => {
+        // 没有识别出文字时，保留原来的文本
+        if (result != '') {
+            updateAsrText(result)
+        }
+        resetAsrState()
+    }, (message: string): void => {
+        toast(t('voice_input.asr_error') + message)
+        resetAsrState()
+    }, (): void => {
+        toast(t('voice_input.mic_permission_denied'))
+        resetAsrState()
+    })
+}
+
+const onAsrMicTap = () => {
+    if (asrRecording.value) {
+        // 正在录音：停止，剩余识别结果返回后在 onFinal 里复位
+        stopVoiceAsr()
+        asrRecording.value = false
+        stopAsrPulse()
+        if (isVoiceAsrRecognizing()) {
+            asrWaiting.value = true
+        } else {
+            resetAsrState()
+        }
+        return
+    }
+    if (isVoiceAsrRecognizing()) {
+        // 已停止录音，正在等待剩余识别结果
+        return
+    }
+    startAsrInput()
+}
 // 输入框当前行数，由 textarea 的 linechange 事件维护，用来决定工具栏是居中还是底部对齐
 const inputLineCount = ref<number>(1)
 const keyboardHeight = ref<number>(300)
@@ -380,6 +509,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+    cancelAsrInput()
+    stopAsrPulse()
     storeDraft()
 })
 
@@ -402,12 +533,17 @@ const notifyTyping = (typingType: number) => {
 }
 
 const onInput = (event: UniInputEvent) => {
+    // 语音输入过程中用户自己改了文本（输入、删除），结束语音输入，已写入的文字保留
+    if ((asrRecording.value || asrWaiting.value) && event.detail.value != asrExpectedText) {
+        cancelAsrInput();
+    }
     let inserting = false;
     if (event.detail.value.length > text.value.length) {
         inserting = true;
     }
     text.value = event.detail.value;
     const cursor = event.detail.cursor;
+    lastCursor = cursor;
     if (inserting) {
         notifyTyping(TypingMessageContent.TYPING_TEXT);
     }
@@ -445,11 +581,13 @@ const onInput = (event: UniInputEvent) => {
 
 // 供会话页调用：撤回后重新编辑、@ 某人
 const insertText = (insert: string) => {
+    cancelAsrInput();
     text.value = text.value + insert;
     moveCursorTo(text.value.length);
 }
 
 const mention = (groupId: string, userId: string) => {
+    cancelAsrInput();
     const userInfo = wfc.getUserInfo(userId, false, groupId);
     mentions.value.push(userInfo);
     text.value = text.value + '@' + userInfo.displayName + ' ';
@@ -457,6 +595,8 @@ const mention = (groupId: string, userId: string) => {
 }
 
 const send = () => {
+    // 正在语音输入时先取消，避免之后返回的识别结果写进已经清空的输入框
+    cancelAsrInput();
     if (text.value != '') {
         const textMessageContent = new TextMessageContent(text.value)
         const quotedMsg = conversationState.quotedMessage;
@@ -510,12 +650,22 @@ const minimizeMessageInputView = () => {
 }
 
 const onInputFocus = () => {
+    inputFocused = true;
     showEmoji.value = false;
     showExt.value = false;
     store.toggleChannelMenu(false);
 }
 
+const onInputBlur = (event: UniTextareaBlurEvent) => {
+    inputFocused = false;
+    lastBlurTime = Date.now();
+    lastCursor = event.detail.cursor;
+    inputFocus.value = false;
+}
+
 const toggleVoice = () => {
+    // 输入框要被换掉了，语音输入跟着结束
+    cancelAsrInput();
     // 语音/表情/更多面板都是占据键盘位置的，切过去时先收起键盘，否则两者会同时占底部空间
     uni.hideKeyboard();
     store.toggleChannelMenu(false);
@@ -529,6 +679,7 @@ const toggleVoice = () => {
 }
 
 const togglePtt = () => {
+    cancelAsrInput();
     uni.hideKeyboard();
     store.toggleChannelMenu(false);
     showPtt.value = !showPtt.value;
@@ -565,6 +716,7 @@ const toggleExt = () => {
 
 /** 菜单栏 / 输入框互切。flutter 那边是 setStatus(menuStatus)，语音、表情、扩展面板都要让位 */
 const toggleChannelMenu = () => {
+    cancelAsrInput();
     uni.hideKeyboard();
     const toMenu = !showChannelMenuBar.value
     store.toggleChannelMenu(toMenu);
@@ -873,6 +1025,7 @@ const onCategoryClick = (i: number) => {
 }
 
 const onClickEmoji = (emoji: string) => {
+    cancelAsrInput();
     text.value = text.value + emoji;
     moveCursorTo(text.value.length);
 }
@@ -1018,9 +1171,32 @@ defineExpose({
     padding: 0 5px;
 }
 
+.wf-input-text-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+}
+
+/* 和右侧的麦克风同处一行，用 flex: 1 吃掉剩余宽度（不显示麦克风时就是整行） */
 .wf-input-textarea {
     padding: 0 12px;
-    width: 100%;
+    flex: 1;
+}
+
+.wf-asr-mic {
+    width: 34px;
+    height: 26px;
+    margin-right: 4px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+}
+
+.wf-asr-mic-icon {
+    font-size: 20px;
+    transition-property: opacity;
+    transition-duration: 600ms;
 }
 
 .wf-input-voice-container {

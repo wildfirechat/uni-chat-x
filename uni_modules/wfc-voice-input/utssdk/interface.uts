@@ -1,0 +1,15 @@
+/**
+ * interface.uts
+ * uts插件接口定义文件，按规范定义接口文件可以在HBuilderX中更好的做到语法提示
+ */
+
+/**
+ * event: 事件名；argsJson: 事件参数的 JSON 数组字符串，应用层用 JSON.parseArray 解析。
+ *
+ * 事件一览（参数按数组顺序）：
+ * - authCodeRequired [requestId]：连接 asr-api 前需要认证码，应用层换到后调 provideAuthCode
+ * - asrPartial [text] / asrFinal [text] / asrError [message] / asrPermissionDenied []：输入框语音输入
+ * - holdRecordSuccess [audioFile, duration] / holdRecordFail [reason] / holdSendText [text] /
+ *   holdPermissionDenied []：按住说话。reason 为 'user canceled' 时是用户主动取消，不用提示
+ */
+export type VoiceInputEventListener = (event: string, argsJson: string) => void

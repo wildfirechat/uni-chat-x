@@ -1,0 +1,117 @@
+/**
+ * 实时语音输入 UTS 插件（Android）。
+ *
+ * 移植自 ../android-chat（uikit/.../asr/*、audio/AudioRecorderPanel.java 等），交互和界面与鸿蒙端一致：
+ * - 输入框麦克风：点一下开始录音，边说边把识别结果写进输入框，再点一下停止；
+ * - 按住说话：仿微信的全屏浮层，松开发送、滑到「取消」不发、滑到「转文字」边说边出字，松手后可编辑再发送或发送原语音。
+ *
+ * 为什么录音 / 识别 / 浮层都在原生侧，见 app-harmony/index.uts 文件头。
+ *
+ * 实现都在同目录的 .kt 里（UTS 原生混编，入口 VoiceInputAndroid.kt），这里只做转发，外加三件要用 uts 运行时的事：
+ * 拿 Activity、申请录音权限、往 HBuilderX 控制台打日志（为什么 .kt 不直接用，见 VoiceInputContext.kt 文件头）。
+ * 和鸿蒙端的差异：
+ * - AMR 用系统 MediaCodec 编码（PcmAmrEncoder.kt），不带 io.kvh 的 aar，免得和 wfc-ptt-client 撞 duplicate class；
+ * - WebSocket 用 OkHttp，config.json 里的版本和 wfc-client 一致；
+ * - 按住说话转发的是屏幕坐标（UniTouch.screenX/screenY）：浮层是单独窗口的 PopupWindow，要换算到它自己的坐标系。
+ *
+ * 三端导出必须齐全，否则对应平台直接编译失败。
+ */
+
+import Activity from 'android.app.Activity'
+import { VoiceInputEventListener } from '../interface.uts'
+
+const RECORD_AUDIO = 'android.permission.RECORD_AUDIO'
+
+let setupDone = false
+
+function requestRecordPermission(callback: (granted: boolean) => void): void {
+    const activity = UTSAndroid.getUniActivity()
+    if (activity == null) {
+        callback(false)
+        return
+    }
+    const permissions: string[] = [RECORD_AUDIO]
+    UTSAndroid.requestSystemPermission(activity!, permissions, (allRight: boolean, grantedList: string[]) => {
+        callback(allRight)
+    }, (doNotAskAgain: boolean, grantedList: string[]) => {
+        if (doNotAskAgain) {
+            // 之前拒绝过并选了不再询问，系统不会再弹授权框：和鸿蒙端一样引导到设置页打开
+            UTSAndroid.gotoSystemPermissionActivity(activity!, permissions)
+        }
+        callback(false)
+    })
+}
+
+function ensureSetup(): void {
+    if (setupDone) {
+        return
+    }
+    setupDone = true
+    VoiceInputAndroid.setup((): Activity | null => {
+        return UTSAndroid.getUniActivity()
+    }, (callback: (granted: boolean) => void): void => {
+        requestRecordPermission(callback)
+    }, (message: string): void => {
+        console.log(message)
+    })
+}
+
+export function isVoiceInputSupported(): boolean {
+    return true
+}
+
+export function onVoiceInputEvent(listener: VoiceInputEventListener): void {
+    ensureSetup()
+    VoiceInputAndroid.setListener(listener)
+}
+
+/**
+ * @param optionsJson { asrServerUrl, asrPartialResult, userId, bubbleColor, speechToTextEnabled, texts }
+ */
+export function configVoiceInput(optionsJson: string): void {
+    VoiceInputAndroid.configure(optionsJson)
+}
+
+/**
+ * 回应 authCodeRequired 事件。换码失败时 authCode 传空串、errorCode 传错误码
+ */
+export function provideAuthCode(requestId: number, authCode: string, errorCode: number): void {
+    VoiceInputAndroid.provideAuthCode(requestId, authCode, errorCode)
+}
+
+export function startAsr(): void {
+    ensureSetup()
+    VoiceInputAndroid.startAsr()
+}
+
+export function stopAsr(): void {
+    VoiceInputAndroid.stopAsr()
+}
+
+export function cancelAsr(): void {
+    VoiceInputAndroid.cancelAsr()
+}
+
+export function isAsrRecognizing(): boolean {
+    return VoiceInputAndroid.isAsrRecognizing()
+}
+
+/**
+ * 按住说话按钮的触摸转发，坐标是屏幕坐标（逻辑像素，即 dp）
+ */
+export function holdTouchDown(x: number, y: number, buttonTop: number): void {
+    ensureSetup()
+    VoiceInputAndroid.holdTouchDown(x, y, buttonTop)
+}
+
+export function holdTouchMove(x: number, y: number): void {
+    VoiceInputAndroid.holdTouchMove(x, y)
+}
+
+export function holdTouchUp(): void {
+    VoiceInputAndroid.holdTouchUp()
+}
+
+export function dismissHoldToTalk(): void {
+    VoiceInputAndroid.dismissHold()
+}

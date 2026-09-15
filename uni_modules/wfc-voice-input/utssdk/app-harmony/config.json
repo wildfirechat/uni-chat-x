@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@wfc/ptt": "./libs/ptt.har"
+  }
+}

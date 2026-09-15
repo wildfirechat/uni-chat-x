@@ -4,9 +4,9 @@
  * 1) longpress 事件下 touches 可能为空数组，而 changedTouches 始终携带
  *    触发事件的触点坐标（uni-app x 官方 touch 示例及本工程录音长按代码
  *    均为 `changedTouches[0]` 优先）。
- * 2) Harmony(ArkUI DOM 模式) 触摸坐标是物理像素，而 getSystemInfoSync()
- *    的 windowWidth/windowHeight 是逻辑像素(vp)，需恒除以 pixelRatio。
- * 3) 但 **tap/click 的坐标本来就是 vp，不要折算**，见 [getPointerPoint]。
+ * 2) Harmony 上触点坐标的单位**随事件类型变**，运行时没有归一，见 [touchScale]：
+ *    touchstart/touchmove/touchend/touchcancel 已经是逻辑像素(vp)，longpress 是物理像素、要除 pixelRatio。
+ * 3) **tap/click 的坐标本来就是 vp，不要折算**，见 [getPointerPoint]。
  *    touch 用 [getTouchPoint]、tap 用 [getPointerPoint]，两者不通用。
  */
 export class TouchPoint {
@@ -19,18 +19,6 @@ export class TouchPoint {
     }
 }
 
-/**
- * 把触摸坐标从物理像素折算为逻辑像素（非 Harmony 平台原样返回）。
- */
-function toLogical(v: number, pixelRatio: number): number {
-    // #ifdef APP-HARMONY
-    return v / pixelRatio
-    // #endif
-    // #ifndef APP-HARMONY
-    return v
-    // #endif
-}
-
 // 屏幕密度运行期不会变，而 touchmove 是逐帧回调，不能每次都去问一次 getSystemInfoSync
 let _pixelRatio: number = 0
 
@@ -39,6 +27,36 @@ function pixelRatio(): number {
         _pixelRatio = uni.getSystemInfoSync().pixelRatio
     }
     return _pixelRatio
+}
+
+const _loggedTouchTypes = new Map<string, boolean>()
+
+/**
+ * 触点坐标要除的系数：已经是逻辑像素返回 1，物理像素返回 pixelRatio。非 Harmony 平台恒为 1。
+ *
+ * Harmony 上两种单位都是实测出来的：
+ * - `touchstart/touchmove/...` 是 **vp**。2026-09-14，376×809 vp、pixelRatio 3.5 的机器：按住底部输入栏的
+ *   「按住说话」，clientY≈746，以前一律除 pixelRatio 变成 213 —— 按住说话浮层的弧形区域顶到屏幕上部、
+ *   手指永远落在左半边滑不到「转文字」；登录滑块只走手指距离的 1/3.5。
+ * - `longpress` 是**物理像素**：07-31 修长按菜单位置（930ec75）就是按除 pixelRatio 调好的。
+ *
+ * 所以只放开 `touch` 开头的事件类型，其余照旧折算：万一哪个运行时的类型名对不上，退回的是原来的行为，
+ * 不会把已经调好的长按菜单弄坏。
+ */
+function touchScale(e: UniTouchEvent): number {
+    // #ifdef APP-HARMONY
+    const type = e.type.toLowerCase()
+    const scale = type.startsWith('touch') ? 1 : pixelRatio()
+    // 临时诊断（真机确认各事件类型的单位后删）：每种事件类型只打一次
+    if (!_loggedTouchTypes.has(type)) {
+        _loggedTouchTypes.set(type, true)
+        console.log('[touch] type=', e.type, 'scale=', scale)
+    }
+    return scale
+    // #endif
+    // #ifndef APP-HARMONY
+    return 1
+    // #endif
 }
 
 /**
@@ -70,8 +88,41 @@ export function getTouchPoint(e: UniTouchEvent): TouchPoint | null {
     if (t == null) {
         return null
     }
-    const ratio = pixelRatio()
-    return new TouchPoint(toLogical(t.clientX, ratio), toLogical(t.clientY, ratio))
+    const scale = touchScale(e)
+    return new TouchPoint(t.clientX / scale, t.clientY / scale)
+}
+
+/**
+ * touch 事件触点的**屏幕坐标**，单位逻辑像素。给窗口级的原生浮层用（wfc-voice-input 的按住说话）。
+ *
+ * 为什么不直接用 [getTouchPoint]：clientX/clientY 相对的是「页面可显示区域」，而插件的浮层是单独的窗口
+ * （Android 的 PopupWindow、iOS 加在 key window 上），它不知道页面区域在屏幕上偏了多少
+ * （原生导航栏、分屏都会让它变）。screenX/screenY 本来就是屏幕坐标，插件自己再换算到浮层坐标系。
+ *
+ * - 鸿蒙照旧返回 [getTouchPoint]：插件在鸿蒙上按窗口坐标算，2026-09-14 真机验证过，不动它；
+ * - 运行时万一没填 screenX/screenY（两个都是 0），退回 clientX/clientY ——
+ *   会话页是自定义导航栏、页面从屏幕顶上开始，两者本来就差不多。
+ */
+export function getTouchScreenPoint(e: UniTouchEvent): TouchPoint | null {
+    // #ifdef APP-HARMONY
+    return getTouchPoint(e)
+    // #endif
+    // #ifndef APP-HARMONY
+    let t: UniTouch | null = null
+    if (e.changedTouches.length > 0) {
+        t = e.changedTouches[e.changedTouches.length - 1]
+    } else if (e.touches.length > 0) {
+        t = e.touches[0]
+    }
+    if (t == null) {
+        return null
+    }
+    const touch = t as UniTouch
+    if (touch.screenX == 0 && touch.screenY == 0) {
+        return new TouchPoint(touch.clientX, touch.clientY)
+    }
+    return new TouchPoint(touch.screenX, touch.screenY)
+    // #endif
 }
 
 /** 节点在屏幕坐标系里的矩形，单位逻辑像素 */
@@ -164,11 +215,11 @@ export function getElementScreenRect(el: UniElement, probe: TouchPoint): ScreenR
  * 正好用来判断「双指变单指」。
  */
 export function getTouchPoints(e: UniTouchEvent): TouchPoint[] {
-    const ratio = pixelRatio()
+    const scale = touchScale(e)
     const points: TouchPoint[] = []
     for (let i = 0; i < e.touches.length; i++) {
         const t = e.touches[i]
-        points.push(new TouchPoint(toLogical(t.clientX, ratio), toLogical(t.clientY, ratio)))
+        points.push(new TouchPoint(t.clientX / scale, t.clientY / scale))
     }
     return points
 }

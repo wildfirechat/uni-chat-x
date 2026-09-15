@@ -1,0 +1,47 @@
+{
+  "id": "wfc-voice-input",
+  "name": "野火IM实时语音输入插件(UTS)",
+  "displayName": "野火IM实时语音输入插件(UTS)",
+  "version": "0.1.0",
+  "description": "实时语音输入：输入框麦克风边说边出字、按住说话滑动转文字。录音（16kHz PCM）、asr-api WebSocket 识别、AMR 编码和按住说话浮层都在原生侧实现（鸿蒙 ArkTS、Android Kotlin、iOS Swift 混编），界面和交互对齐 android-chat / hm-chat / ios-chat。AMR 编码：鸿蒙用对讲 SDK 的 ptt.har（libpttamr.so），Android 用系统 MediaCodec，iOS 用 WFChatClient.xcframework 里的 opencore-amr。iOS 13 以下不支持。",
+  "keywords": [
+    "IM",
+    "语音输入",
+    "ASR",
+    "speech-to-text"
+  ],
+  "dcloudext": {
+    "declaration": {
+      "ads": "无",
+      "data": "录音数据会发送到配置的语音识别服务（asr-api），详情参考 https://gitee.com/wfchat/asr-api",
+      "permissions": "麦克风权限、振动权限"
+    },
+    "type": "uts"
+  },
+  "uni_modules": {
+    "platforms": {
+      "client": {
+        "uni-app-x": {
+          "app": {
+            "android": {
+              "extVersion": "0.1.0",
+              "minVersion": "21"
+            },
+            "ios": {
+              "extVersion": "0.1.0",
+              "minVersion": "12"
+            },
+            "harmony": {
+              "extVersion": "0.1.0",
+              "minVersion": "12"
+            }
+          }
+        }
+      }
+    }
+  },
+  "engines": {
+    "HBuilderX": "^4.84",
+    "uni-app-x": "^4.84"
+  }
+}

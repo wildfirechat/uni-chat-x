@@ -1,0 +1,92 @@
+/**
+ * 实时语音输入 UTS 插件（iOS）。
+ *
+ * 移植自 ../ios-chat（wfuikit/WFChatUIKit/ASR/*、Vendor/ChatInputBar/WFCUVoiceInputView.m），
+ * 按住说话的状态流转和鸿蒙端、Android 端一致（基准是 android-chat 的 AudioRecorderPanel.java）：
+ * - 输入框麦克风：点一下开始录音，边说边把识别结果写进输入框，再点一下停止；
+ * - 按住说话：仿微信的全屏浮层，松开发送、滑到「取消」不发、滑到「转文字」边说边出字，松手后可编辑再发送或发送原语音。
+ *
+ * 为什么录音 / 识别 / 浮层都在原生侧，见 app-harmony/index.uts 文件头。
+ *
+ * 实现都在同目录的 .swift 里（UTS 原生混编，入口 VoiceInputIOS.swift），这里只做转发，外加往 HBuilderX 控制台打日志
+ * （为什么 .swift 不直接用 console，见 VoiceInputSupport.swift 文件头）。和另外两端的差异：
+ * - iOS 没有系统 AMR 编码器，借 IM SDK 里的 opencore-amr（VoiceAmrEncoder.swift），所以插件带了一份 WFChatClient.xcframework；
+ * - 实时识别用 URLSessionWebSocketTask，iOS 13 以下 isVoiceInputSupported() 返回 false，应用层回退到原来的录音交互；
+ * - 按住说话转发的是屏幕坐标（UniTouch.screenX/screenY），浮层加在 key window 上，自己换算到浮层坐标系。
+ *
+ * 三端导出必须齐全，否则对应平台直接编译失败。
+ */
+
+import { VoiceInputEventListener } from '../interface.uts'
+
+let setupDone = false
+
+function ensureSetup(): void {
+    if (setupDone) {
+        return
+    }
+    setupDone = true
+    VoiceInputIOS.setup((message: string): void => {
+        console.log(message)
+    })
+}
+
+export function isVoiceInputSupported(): boolean {
+    return VoiceInputIOS.isSupported()
+}
+
+export function onVoiceInputEvent(listener: VoiceInputEventListener): void {
+    ensureSetup()
+    VoiceInputIOS.setListener(listener)
+}
+
+/**
+ * @param optionsJson { asrServerUrl, asrPartialResult, userId, bubbleColor, speechToTextEnabled, texts }
+ */
+export function configVoiceInput(optionsJson: string): void {
+    VoiceInputIOS.configure(optionsJson)
+}
+
+/**
+ * 回应 authCodeRequired 事件。换码失败时 authCode 传空串、errorCode 传错误码
+ */
+export function provideAuthCode(requestId: number, authCode: string, errorCode: number): void {
+    VoiceInputIOS.provideAuthCode(requestId, authCode, errorCode)
+}
+
+export function startAsr(): void {
+    ensureSetup()
+    VoiceInputIOS.startAsr()
+}
+
+export function stopAsr(): void {
+    VoiceInputIOS.stopAsr()
+}
+
+export function cancelAsr(): void {
+    VoiceInputIOS.cancelAsr()
+}
+
+export function isAsrRecognizing(): boolean {
+    return VoiceInputIOS.isAsrRecognizing()
+}
+
+/**
+ * 按住说话按钮的触摸转发，坐标是屏幕坐标（逻辑像素，即 pt）
+ */
+export function holdTouchDown(x: number, y: number, buttonTop: number): void {
+    ensureSetup()
+    VoiceInputIOS.holdTouchDown(x, y, buttonTop)
+}
+
+export function holdTouchMove(x: number, y: number): void {
+    VoiceInputIOS.holdTouchMove(x, y)
+}
+
+export function holdTouchUp(): void {
+    VoiceInputIOS.holdTouchUp()
+}
+
+export function dismissHoldToTalk(): void {
+    VoiceInputIOS.dismissHold()
+}

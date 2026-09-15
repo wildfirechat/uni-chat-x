@@ -1,0 +1,224 @@
+/**
+ * 实时语音输入的应用层入口，包一层 uni_modules/wfc-voice-input。
+ *
+ * 插件在原生侧录音、连 asr-api 识别、画按住说话的浮层（原因见插件 app-harmony/index.uts 文件头）；这里负责：
+ * - 每次开始前把配置送给插件：服务地址、当前用户、主题色、当前语言的文案（插件读不到 App 的 i18n 和主题）；
+ * - 插件要认证码时用 wfc.getAuthCode 换好送回去（和语音消息转文字同一套，见 common/asr.uts）；
+ * - 把插件事件分发给当前的处理方。
+ *
+ * ## 处理函数为什么在「开始」时才设置
+ *
+ * 会话页可能叠两层（从名片进另一个会话），两个输入栏都挂着。如果在 onMounted 里设、onUnmounted 里清，
+ * 上层页面一退出就把下层页面的处理函数也清掉了。所以谁开始录音谁设置，后来者覆盖，不在卸载时清。
+ *
+ * 三端都有实现（鸿蒙 .ets、Android .kt、iOS .swift）；iOS 13 以下 isVoiceInputSupported() 返回 false，调用方回退到原来的交互。
+ */
+import * as native from '@/uni_modules/wfc-voice-input'
+import Config from '../config.uts'
+import wfc from '../wfc/client/wfc.uts'
+import { getAsrAuthCode } from './asr.uts'
+import { colors } from './theme.uts'
+import { t } from '@/i18n/i18n.uts'
+
+/** 按住说话时用户主动取消，插件回调 holdRecordFail 的 reason，不用提示 */
+export const REASON_USER_CANCELED = 'user canceled'
+
+export type VoiceTextHandler = (text: string) => void
+export type VoiceVoidHandler = () => void
+export type VoiceRecordSuccessHandler = (audioFile: string, duration: number) => void
+
+let asrPartialHandler: VoiceTextHandler | null = null
+let asrFinalHandler: VoiceTextHandler | null = null
+let asrErrorHandler: VoiceTextHandler | null = null
+let asrPermissionDeniedHandler: VoiceVoidHandler | null = null
+
+let holdRecordSuccessHandler: VoiceRecordSuccessHandler | null = null
+let holdRecordFailHandler: VoiceTextHandler | null = null
+let holdSendTextHandler: VoiceTextHandler | null = null
+let holdPermissionDeniedHandler: VoiceVoidHandler | null = null
+
+let listenerBound = false
+
+function parseArgs(argsJson: string): Array<any | null> {
+    const arr = JSON.parseArray(argsJson)
+    return arr == null ? [] : arr as Array<any | null>
+}
+
+function argString(args: Array<any | null>, i: number): string {
+    if (i >= args.length || args[i] == null) return ''
+    return args[i] as string
+}
+
+function argNumber(args: Array<any | null>, i: number): number {
+    if (i >= args.length || args[i] == null) return 0
+    return args[i] as number
+}
+
+function provideAuthCodeFor(requestId: number): void {
+    getAsrAuthCode((authCode: string) => {
+        native.provideAuthCode(requestId, authCode, 0)
+    }, (err: number) => {
+        console.log('voice input getAuthCode fail', err)
+        native.provideAuthCode(requestId, '', err)
+    })
+}
+
+function handleEvent(event: string, args: Array<any | null>): void {
+    switch (event) {
+        case 'authCodeRequired':
+            provideAuthCodeFor(argNumber(args, 0))
+            break
+        case 'asrPartial':
+            asrPartialHandler?.(argString(args, 0))
+            break
+        case 'asrFinal':
+            asrFinalHandler?.(argString(args, 0))
+            break
+        case 'asrError':
+            asrErrorHandler?.(argString(args, 0))
+            break
+        case 'asrPermissionDenied':
+            asrPermissionDeniedHandler?.()
+            break
+        case 'holdRecordSuccess':
+            holdRecordSuccessHandler?.(argString(args, 0), argNumber(args, 1))
+            break
+        case 'holdRecordFail':
+            holdRecordFailHandler?.(argString(args, 0))
+            break
+        case 'holdSendText':
+            holdSendTextHandler?.(argString(args, 0))
+            break
+        case 'holdPermissionDenied':
+            holdPermissionDeniedHandler?.()
+            break
+        default:
+            console.log('voice input unknown event', event)
+            break
+    }
+}
+
+function ensureListener(): void {
+    if (listenerBound) {
+        return
+    }
+    listenerBound = true
+    native.onVoiceInputEvent((event: string, argsJson: string) => {
+        handleEvent(event, parseArgs(argsJson))
+    })
+}
+
+/** 实时识别服务是否配置了地址 */
+function isAsrStreamConfigured(): boolean {
+    return Config.ASR_STREAM_SERVER.trim() != ''
+}
+
+/**
+ * 把配置送给插件。每次开始都送一遍：切换语言、主题、重新登录后都要跟着变，送一次的开销可以忽略
+ */
+function pushConfig(): void {
+    const options = {
+        asrServerUrl: Config.ASR_STREAM_SERVER,
+        asrPartialResult: Config.ENABLE_ASR_PARTIAL_RESULT,
+        userId: wfc.getUserId(),
+        // 气泡用主色调，对齐 android-chat 的 colorPrimary
+        bubbleColor: colors().accent,
+        speechToTextEnabled: isAsrStreamConfigured(),
+        texts: {
+            voice: t('voice_input.voice'),
+            releaseToSend: t('voice_input.release_to_send'),
+            cancel: t('voice_input.cancel'),
+            releaseToCancel: t('voice_input.release_to_cancel'),
+            slideToText: t('voice_input.slide_to_text'),
+            releaseToEdit: t('voice_input.release_to_edit'),
+            sendVoice: t('voice_input.send_voice'),
+            send: t('voice_input.send'),
+            noText: t('voice_input.no_text'),
+            recognizeFailed: t('voice_input.recognize_failed'),
+            countDown: t('voice_input.count_down'),
+            tooShort: t('voice_input.too_short'),
+            recordFailed: t('voice_input.record_failed')
+        } as UTSJSONObject
+    } as UTSJSONObject
+    native.configVoiceInput(JSON.stringify(options))
+}
+
+// ---- 输入框语音输入 ----
+
+/** 输入框右侧的麦克风是否显示：插件支持，且配了实时识别地址 */
+export function isAsrInputAvailable(): boolean {
+    return native.isVoiceInputSupported() && isAsrStreamConfigured()
+}
+
+/**
+ * 开始语音输入。没有麦克风权限时插件会先申请，拒绝后回调 onPermissionDenied。
+ *
+ * @param onPartial 本次识别到目前为止的全部文本（每说完一句、或者正在说的这句有了中间结果）
+ * @param onFinal   识别结束，全部文本，可能为空；之后不再回调
+ * @param onError   出错，之后不再回调
+ */
+export function startAsr(onPartial: VoiceTextHandler, onFinal: VoiceTextHandler, onError: VoiceTextHandler, onPermissionDenied: VoiceVoidHandler): void {
+    asrPartialHandler = onPartial
+    asrFinalHandler = onFinal
+    asrErrorHandler = onError
+    asrPermissionDeniedHandler = onPermissionDenied
+    ensureListener()
+    pushConfig()
+    native.startAsr()
+}
+
+/** 停止录音，剩余识别结果返回后回调 onFinal */
+export function stopAsr(): void {
+    native.stopAsr()
+}
+
+/** 取消，丢弃还没返回的识别结果，之后不再回调 */
+export function cancelAsr(): void {
+    native.cancelAsr()
+}
+
+/** 是否正在识别，包括申请权限、停止录音后等待剩余识别结果 */
+export function isAsrRecognizing(): boolean {
+    return native.isAsrRecognizing()
+}
+
+// ---- 按住说话 ----
+
+/**
+ * 按住说话是否走插件的原生浮层。没配实时识别地址也走，只是不能滑到「转文字」
+ */
+export function isNativeHoldToTalkAvailable(): boolean {
+    return native.isVoiceInputSupported()
+}
+
+/**
+ * 手指按下「按住说话」。坐标都是屏幕坐标（逻辑像素），用 common/touch.uts 的 getTouchScreenPoint 取
+ * （浮层是窗口级的，插件自己换算到浮层坐标系；鸿蒙上它就是 getTouchPoint 的窗口坐标）
+ *
+ * @param onRecordSuccess 录音完成，audioFile 是 AMR 文件的本地路径，duration 单位秒
+ * @param onRecordFail    录音失败或取消，reason 为 [REASON_USER_CANCELED] 时不用提示
+ * @param onSendText      转文字后用户点了发送
+ */
+export function holdTouchDown(x: number, y: number, buttonTop: number, onRecordSuccess: VoiceRecordSuccessHandler, onRecordFail: VoiceTextHandler, onSendText: VoiceTextHandler, onPermissionDenied: VoiceVoidHandler): void {
+    holdRecordSuccessHandler = onRecordSuccess
+    holdRecordFailHandler = onRecordFail
+    holdSendTextHandler = onSendText
+    holdPermissionDeniedHandler = onPermissionDenied
+    ensureListener()
+    pushConfig()
+    native.holdTouchDown(x, y, buttonTop)
+}
+
+export function holdTouchMove(x: number, y: number): void {
+    native.holdTouchMove(x, y)
+}
+
+/** 手指抬起或手势被打断，都按手指当前所在的目标结束 */
+export function holdTouchUp(): void {
+    native.holdTouchUp()
+}
+
+/** 录音入口销毁时调用：立即关闭浮层，停止录音和识别，不回调 */
+export function dismissHoldToTalk(): void {
+    native.dismissHoldToTalk()
+}

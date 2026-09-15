@@ -572,6 +572,23 @@ export default {
         "success": "Speech to text success",
         "audio_not_available": "Audio file not available"
     },
+    "voice_input": {
+        "voice": "Voice",
+        "release_to_send": "Release to Send",
+        "cancel": "Cancel",
+        "release_to_cancel": "Release to Cancel",
+        "slide_to_text": "Slide here to Text",
+        "release_to_edit": "Release to Edit",
+        "send_voice": "Send Voice",
+        "send": "Send",
+        "no_text": "No speech recognized",
+        "recognize_failed": "Speech to text failed",
+        "count_down": "Recording stops in %d s",
+        "too_short": "Message too short",
+        "record_failed": "Recording failed",
+        "asr_error": "Speech recognition error: ",
+        "mic_permission_denied": "Please grant microphone permission"
+    },
     "audio": {
         "play_mode_speaker": "Play via Speaker",
         "play_mode_earpiece": "Play via Earpiece",

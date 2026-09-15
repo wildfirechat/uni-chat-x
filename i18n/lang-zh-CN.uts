@@ -572,6 +572,23 @@ export default {
         "success": "转文字成功",
         "audio_not_available": "音频文件不可用"
     },
+    "voice_input": {
+        "voice": "语音",
+        "release_to_send": "松开 发送",
+        "cancel": "取消",
+        "release_to_cancel": "松手 取消",
+        "slide_to_text": "滑到这里 转文字",
+        "release_to_edit": "松手 编辑文字",
+        "send_voice": "发送原语音",
+        "send": "发送",
+        "no_text": "未识别到文字",
+        "recognize_failed": "转文字失败",
+        "count_down": "%d 秒后将停止录音",
+        "too_short": "说话时间太短",
+        "record_failed": "录音失败",
+        "asr_error": "语音识别错误: ",
+        "mic_permission_denied": "请授予麦克风权限"
+    },
     "audio": {
         "play_mode_speaker": "扬声器播放",
         "play_mode_earpiece": "听筒播放",

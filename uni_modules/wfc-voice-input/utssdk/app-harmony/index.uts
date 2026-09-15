@@ -1,0 +1,88 @@
+/**
+ * 实时语音输入 UTS 插件（鸿蒙）。
+ *
+ * 移植自 ../hm-chat（uikit/src/main/ets/asr/*、pages/conversation/audio/*），交互和界面对齐 ../android-chat：
+ * - 输入框麦克风：点一下开始录音，边说边把识别结果写进输入框，再点一下停止；
+ * - 按住说话：仿微信的全屏浮层，松开发送、滑到「取消」不发、滑到「转文字」边说边出字，松手后可编辑再发送或发送原语音。
+ *
+ * ## 为什么录音 / 识别 / 浮层都在原生侧
+ *
+ * - `uni.getRecorderManager().onFrameRecorded` 在 App 三端都不支持，拿不到 16kHz PCM；
+ * - `uni.connectSocket` 的 header 参数鸿蒙端不支持，asr-api 要的 authCode 塞不进握手；
+ * - 浮层是 60fps 的 Canvas 动画 + 手势跟随 + 编辑态键盘避让，三端原生都有现成实现，直接移植比在 uvue 里重做更可靠。
+ *
+ * 应用层入口是 common/voiceInput.uts。所有实现在同目录的 .ets 里，这里只做转发。
+ * 三端导出必须齐全：uts 插件走运行时 proxy，鸿蒙端少导出一个函数编译期无感，运行到才报 not a function。
+ */
+
+import { VoiceInputEventListener } from '../interface.uts'
+import {
+    voiceInputCancelAsr,
+    voiceInputConfigure,
+    voiceInputDismissHold,
+    voiceInputHoldTouchDown,
+    voiceInputHoldTouchMove,
+    voiceInputHoldTouchUp,
+    voiceInputIsAsrRecognizing,
+    voiceInputProvideAuthCode,
+    voiceInputSetListener,
+    voiceInputStartAsr,
+    voiceInputStopAsr
+} from './voiceInput.ets'
+
+export function isVoiceInputSupported(): boolean {
+    return true
+}
+
+export function onVoiceInputEvent(listener: VoiceInputEventListener): void {
+    voiceInputSetListener(listener)
+}
+
+/**
+ * @param optionsJson { asrServerUrl, asrPartialResult, userId, bubbleColor, speechToTextEnabled, texts }
+ */
+export function configVoiceInput(optionsJson: string): void {
+    voiceInputConfigure(optionsJson)
+}
+
+/**
+ * 回应 authCodeRequired 事件。换码失败时 authCode 传空串、errorCode 传错误码
+ */
+export function provideAuthCode(requestId: number, authCode: string, errorCode: number): void {
+    voiceInputProvideAuthCode(requestId, authCode, errorCode)
+}
+
+export function startAsr(): void {
+    voiceInputStartAsr()
+}
+
+export function stopAsr(): void {
+    voiceInputStopAsr()
+}
+
+export function cancelAsr(): void {
+    voiceInputCancelAsr()
+}
+
+export function isAsrRecognizing(): boolean {
+    return voiceInputIsAsrRecognizing()
+}
+
+/**
+ * 按住说话按钮的触摸转发，坐标是窗口坐标（逻辑像素）
+ */
+export function holdTouchDown(x: number, y: number, buttonTop: number): void {
+    voiceInputHoldTouchDown(x, y, buttonTop)
+}
+
+export function holdTouchMove(x: number, y: number): void {
+    voiceInputHoldTouchMove(x, y)
+}
+
+export function holdTouchUp(): void {
+    voiceInputHoldTouchUp()
+}
+
+export function dismissHoldToTalk(): void {
+    voiceInputDismissHold()
+}
