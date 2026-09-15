@@ -251,16 +251,42 @@ const onExtPageChange = (event: UniSwiperChangeEvent) => {
 const showExt = ref<boolean>(false)
 const showEmoji = ref<boolean>(false)
 const text = ref<string>('')
-// Android 上「代码改 value」不会把光标带到新文本末尾 —— 实测 @ 选完人之后，光标还停在刚敲的
-// '@' 后面(卡在 "@张三 " 中间)，接着打字会插到名字前面。鸿蒙没这个问题。
+// textarea 没有读取选区的接口，光标只能从 input / blur 事件里记。
+// 这几个声明必须在 moveCursorTo 之前：UTS 编译到 Kotlin 后，lambda 里引用后声明的局部变量是编译错误。
+let lastCursor = -1
+let inputFocused = false
+let lastBlurTime = 0
+
+// 「代码改 value」不会把光标带到新文本末尾 —— Android 实测 @ 选完人之后，光标还停在刚敲的
+// '@' 后面(卡在 "@张三 " 中间)，接着打字会插到名字前面；iOS 原生侧 setText 后保持原光标位置
+// 不动，语音输入连续写入识别结果时，光标就被留在了新输入内容的前面。鸿蒙没这个问题。
 // 解法是显式指定 textarea 的 cursor：Android 端收到 cursor 属性就直接 setSelection
-// (离线 SDK app-runtime → InputComponent.setAttrProperty 的 "cursor" 分支)。
-// 用完立刻置回 -1(cursor 的默认值，不会触发 setSelection)，否则下次要落的位置万一和这次相同，
-// 属性没变化就不会下发，光标又不动了。
+// (离线 SDK app-runtime → InputComponent.setAttrProperty 的 "cursor" 分支)，iOS 端同理。
 const inputCursor = ref<number>(-1)
 const moveCursorTo = (pos: number) => {
-    // #ifdef APP-ANDROID
+    // #ifdef APP-ANDROID || APP-IOS
+    // #ifdef APP-IOS
+    // iOS 在 HBuilderX 5.26 之前设置 cursor 会连带触发 focus(框架 bug)，键盘没弹时不动光标，
+    // 免得插表情/@ 时把键盘意外弹出来；语音输入期间输入框本来就持有焦点，不受这个限制影响
+    if (!inputFocused) {
+        return
+    }
+    // #endif
+    // 目标位置和挂起的值相同时属性不算变化、不会下发 —— 语音输入的识别结果连续到达，两次目标
+    // 位置经常相同。先打回 -1、下一拍再设回目标位置，保证每次调用都有一次真正的 setSelection。
+    if (inputCursor.value == pos) {
+        inputCursor.value = -1
+        nextTick((): void => {
+            inputCursor.value = pos
+            nextTick((): void => {
+                inputCursor.value = -1
+            })
+        })
+        return
+    }
     inputCursor.value = pos
+    // 用完立刻置回 -1(cursor 的默认值，不会触发 setSelection)，否则下次要落的位置万一和这次相同，
+    // 属性没变化就不会下发，光标又不动了。
     nextTick((): void => {
         inputCursor.value = -1
     })
@@ -290,10 +316,6 @@ let asrTextStart = 0
 let asrTextEnd = 0
 // 最近一次写入识别结果后的文本，用来区分用户自己的编辑
 let asrExpectedText = ''
-// textarea 没有读取选区的接口，光标只能从 input / blur 事件里记
-let lastCursor = -1
-let inputFocused = false
-let lastBlurTime = 0
 
 const stopAsrPulse = () => {
     if (asrPulseTimer != 0) {
@@ -407,13 +429,15 @@ const safeAreaBottomHeight = ref<number>(0)
 const sysInfo = uni.getSystemInfoSync()
 safeAreaBottomHeight.value = sysInfo.safeAreaInsets.bottom
 
-// 鸿蒙和 Android 都关掉系统的键盘避让，改为手动把输入区抬到键盘上方：
+// 三个 App 平台都关掉系统的键盘避让，改为手动把输入区抬到键盘上方：
 // - 鸿蒙：textarea 聚焦时框架会把 KeyboardAvoidMode 设为 OFFSET，整个页面(含页面内自定义导航栏)
 //   被键盘顶出屏幕，且顶起高度按光标算，输入框仍会被挡住一部分；
 // - Android：adjust-position=true 时框架是给页面根容器加 translationY(见离线 SDK app-runtime 里的
 //   io.dcloud.px.v0)，位移量只在键盘弹出的那一刻按输入框当时的位置算一次，之后不再重算。而我们在
 //   @focus 里收起表情/更多面板，输入框随后又往下掉了一个面板的高度，位移量就成了错的 —— 表现为先开
 //   面板再点输入框时，输入框留在底部被键盘盖住(直接点输入框没有这个落差，所以看着是正常的)。
+// - iOS：同样是上推量只在键盘弹出那一刻按输入框当时的高度算一次，textarea 是 auto-height，
+//   输入框随输入长高之后不再重算，多行输入时键盘就盖住输入框的下部。
 const adjustPosition = ref<boolean>(true)
 // #ifdef APP-HARMONY
 adjustPosition.value = false
@@ -421,9 +445,13 @@ adjustPosition.value = false
 // #ifdef APP-ANDROID
 adjustPosition.value = false
 // #endif
+// #ifdef APP-IOS
+adjustPosition.value = false
+// #endif
 
 // Android 的 uni.onKeyboardHeightChange 报的高度是扣掉导航栏之后的(框架自己也要把 navigationBars
-// 的 inset 加回去才当成键盘的真实高度)，所以顶起输入区时要补上底部安全区；鸿蒙报的就是完整高度。
+// 的 inset 加回去才当成键盘的真实高度)，所以顶起输入区时要补上底部安全区；
+// 鸿蒙和 iOS 报的就是完整高度(键盘下沿贴着屏幕底边)。
 const keyboardBottomInset = ref<number>(0)
 // #ifdef APP-ANDROID
 keyboardBottomInset.value = safeAreaBottomHeight.value
