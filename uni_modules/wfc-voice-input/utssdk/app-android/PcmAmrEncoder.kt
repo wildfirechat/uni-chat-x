@@ -62,7 +62,8 @@ internal object PcmAmrEncoder {
             format.setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
             val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AMR_NB)
             codec = encoder
-            encoder.configure(format, null, null, 0)
+            // 编码器必须带 CONFIGURE_FLAG_ENCODE：Codec2 的编码器组件不带这个标志 configure 直接报 UNKNOWN_ERROR
+            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             encoder.start()
             FileOutputStream(outPath).use { out ->
                 out.write(AMR_HEADER)
