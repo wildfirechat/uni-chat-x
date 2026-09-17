@@ -1,3 +1,5 @@
+import { selectServer } from './common/dualNetwork.uts'
+
 export class ICEServer {
     uri: string
     userName: string
@@ -35,17 +37,24 @@ export default class Config {
     // 上线建议使用https，使用https更安全。
     //static APP_SERVER = 'http://wildfirechat.net:8888';
     static APP_SERVER = 'https://app.wildfirechat.net';
+    // 应用服务备选地址，双网环境下使用，不需要双网时保持空字符串。下面各服务的 xxx_BACKUP 同理。
+    // 双网环境指政企单位内外网两种网络，IM 的备选地址见下面的 IM_SERVER_BACKUP_HOST。
+    // 业务代码请用 Config.getAppServer() 等方法取地址，它们会按 IM 当前连接的网络在主备地址之间选。
+    static APP_SERVER_BACKUP = '';
 
     // 组织结构服务地址，如果没有部署组织结构服务，或者不需要组织结构的话，可置为 ''
     // 组织结构项目：https://github.com/wildfirechat/organization-platform 或 https://gitee.com/wfchat/organization-platform
     static ORGANIZATION_SERVER = 'https://org.wildfirechat.net';
+    static ORGANIZATION_SERVER_BACKUP = '';
 
     // 工作台地址，如果不需要工作台，请删除 pages.json 里面，WorkspacePage 相关配置
     static WORKSPACE_URL = "https://open.wildfirechat.cn/work.html";
+    static WORKSPACE_URL_BACKUP = '';
 
     // 语音转文字（ASR）服务地址。不走 IM 协议栈，客户端直接 POST 语音的 remoteUrl 过去。
     // 置空则消息长按菜单不显示「语音转文字」。
     static ASR_SERVER = 'https://app.wildfirechat.net/asr/api/recognize';
+    static ASR_SERVER_BACKUP = '';
 
     // 实时语音输入服务地址（asr-api 的实时识别接口）。配置后输入框右侧显示麦克风按钮，按住说话时也可以滑到「转文字」；置空则关闭。
     // 连接时会在 header authCode 里带上 IM 认证码，由 asr-api 校验。内网测试也可以直连 wf-voice（如 ws://192.168.1.100:12436），
@@ -53,6 +62,7 @@ export default class Config {
     // 野火提供的测试服务会记录语音和识别出的文字，上线请部署自己的服务，参考 https://gitee.com/wfchat/asr-api
     // 目前只有鸿蒙端实现了（uni_modules/wfc-voice-input），Android / iOS 配了也不生效。
     static ASR_STREAM_SERVER = 'wss://app.wildfirechat.net/asr/api/stream';
+    static ASR_STREAM_SERVER_BACKUP = '';
 
     // 实时语音输入是否边说边出字。关闭时每说完一句才显示这句话；开启后服务端 CPU 占用更高，旧版 wf-voice 不支持（效果同关闭）。
     static ENABLE_ASR_PARTIAL_RESULT = true;
@@ -60,15 +70,24 @@ export default class Config {
     // 群接龙服务地址。独立服务，不走 IM 协议栈，鉴权走 getAuthCode（见 api/authCodeApiClient.uts）。
     // 置空则群聊输入框的扩展面板不显示「群接龙」入口，接龙消息气泡也不再可点。
     static COLLECTION_SERVER = 'https://jielong.wildfirechat.net';
+    static COLLECTION_SERVER_BACKUP = '';
 
     // 群投票服务地址。独立服务，不走 IM 协议栈，鉴权走 getAuthCode（见 api/authCodeApiClient.uts）。
     // 置空则群聊输入框的扩展面板不显示「群投票」入口，投票消息气泡也不再可点。
     static POLL_SERVER = 'https://poll.wildfirechat.net';
+    static POLL_SERVER_BACKUP = '';
 
     // 请仔细看注释
     // 仅仅是 HOST，没有 http 前缀，后面也没有端口
     // IM SERVER 的 host 地址，一定要和 APP_SERVER 对应起来，即 APP_SERVER 上配置的 im-server 和下面所配置的im-server 是同一个
     static IM_SERVER_HOST = 'wildfirechat.net'/** 请仔细看上面的注释，仅仅是 HOST，没有 http 前缀，后面也没有端口 **/;
+
+    // IM 备选地址，仅专业版 IM 服务支持，一般用于政企单位内外网两种网络环境，不需要双网时保持空字符串。
+    // 和 IM_SERVER_HOST 一样仅仅是 HOST（IP 或域名），端口单独配置。
+    static IM_SERVER_BACKUP_HOST = '';
+    static IM_SERVER_BACKUP_PORT = 80;
+    // 网络策略，配置了 IM_SERVER_BACKUP_HOST 才生效：0 复合连接，协议栈自己在主备之间选；1 只用主网络；2 只用备选网络
+    static BACKUP_ADDRESS_STRATEGY = 0;
 
     static QR_CODE_PREFIX_PC_SESSION = "wildfirechat://pcsession/";
 
@@ -205,6 +224,43 @@ export default class Config {
         // 示例代码
         // url = url.replace('oss.xxxx.com', '192.168.2.19');
         return url;
+    }
+
+    // ---- 按 IM 当前连接的网络在主备地址之间选，见 common/dualNetwork.uts ----
+    // 登录前 IM 还没连上时网络未知，应用服务的请求会先探测主备地址，见 api/appServerApi.uts 的 resolveAppServer
+
+    static getAppServer(): string {
+        return selectServer(Config.APP_SERVER, Config.APP_SERVER_BACKUP)
+    }
+
+    /** url 是否是应用服务的地址，双网环境下，主备地址都算 */
+    static isAppServerUrl(url: string): boolean {
+        return (Config.APP_SERVER != '' && url.startsWith(Config.APP_SERVER))
+            || (Config.APP_SERVER_BACKUP != '' && url.startsWith(Config.APP_SERVER_BACKUP))
+    }
+
+    static getOrganizationServer(): string {
+        return selectServer(Config.ORGANIZATION_SERVER, Config.ORGANIZATION_SERVER_BACKUP)
+    }
+
+    static getWorkspaceUrl(): string {
+        return selectServer(Config.WORKSPACE_URL, Config.WORKSPACE_URL_BACKUP)
+    }
+
+    static getAsrServer(): string {
+        return selectServer(Config.ASR_SERVER, Config.ASR_SERVER_BACKUP)
+    }
+
+    static getAsrStreamServer(): string {
+        return selectServer(Config.ASR_STREAM_SERVER, Config.ASR_STREAM_SERVER_BACKUP)
+    }
+
+    static getCollectionServer(): string {
+        return selectServer(Config.COLLECTION_SERVER, Config.COLLECTION_SERVER_BACKUP)
+    }
+
+    static getPollServer(): string {
+        return selectServer(Config.POLL_SERVER, Config.POLL_SERVER_BACKUP)
     }
 
     /**

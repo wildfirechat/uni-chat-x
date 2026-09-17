@@ -1,0 +1,71 @@
+/**
+ * 双网（政企内外网）环境下的网络状态与服务地址选择。对齐 android-chat `Config.selectServer`
+ * 和 `ChatManager.isConnectedToMainNetwork`。
+ *
+ * 双网部署时，IM 有主备两个地址（`wfc.setBackupAddress`），协议栈自己决定连哪个；应用服务、
+ * 组织通讯录等辅助服务也各有主备两个地址，客户端要跟着 IM 当前连的网络选。
+ *
+ * 本文件不 import 任何业务模块：config.uts 要用 [selectServer]，而 wfc.uts 又 import 了
+ * config.uts，放在这里才不会成环。网络状态由 wfc.uts 在连接状态变化时写进来。
+ */
+
+/** 网络策略：0 复合连接，协议栈自己在主备之间选；1 只用主网络；2 只用备选网络 */
+export const BACKUP_ADDRESS_STRATEGY_AUTO: number = 0
+export const BACKUP_ADDRESS_STRATEGY_MAIN: number = 1
+export const BACKUP_ADDRESS_STRATEGY_BACKUP: number = 2
+
+let backupAddressStrategy: number = BACKUP_ADDRESS_STRATEGY_AUTO
+
+/**
+ * 最近一次连接的是不是主网络。还没连过时网络未知，和协议栈保持一致，按主网络处理。
+ */
+let lastConnectedToMainNetwork = true
+
+/** 由 wfc.setBackupAddressStrategy 调用，业务代码请调 wfc 的 */
+export function updateBackupAddressStrategy(strategy: number): void {
+    backupAddressStrategy = strategy
+    if (strategy == BACKUP_ADDRESS_STRATEGY_AUTO) {
+        // 对齐 android-chat ClientService.setBackupAddressStrategy
+        lastConnectedToMainNetwork = true
+    }
+}
+
+export function getBackupAddressStrategy(): number {
+    return backupAddressStrategy
+}
+
+/** 由 wfc.uts 在连上服务后，用协议栈查到的结果调用 */
+export function updateConnectedToMainNetwork(mainNetwork: boolean): void {
+    lastConnectedToMainNetwork = mainNetwork
+}
+
+/**
+ * 当前是否连在主网络。指定了网络策略时以策略为准；IM 断线重连、同步消息（Receiving）等
+ * 非 Connected 状态时，沿用最近一次连接的网络。
+ */
+export function isConnectedToMainNetwork(): boolean {
+    if (backupAddressStrategy == BACKUP_ADDRESS_STRATEGY_MAIN) {
+        return true
+    }
+    if (backupAddressStrategy == BACKUP_ADDRESS_STRATEGY_BACKUP) {
+        return false
+    }
+    return lastConnectedToMainNetwork
+}
+
+/**
+ * 根据当前网络在主备地址之间选择。只配了一个时直接用配了的那个，不需要双网时备选地址保持空字符串即可。
+ *
+ * ⚠️ 和 android-chat 当前代码有一处不同：那边 IM 非 Connected 时一律返回主地址，这里沿用最近一次
+ * 连接的网络（android-chat 该方法注释里写的也是这个语义）。否则备网用户每次断线重连、以及连上后
+ * 同步消息（Receiving）期间拼出来的默认头像等地址都是主网的，加载不出来。
+ */
+export function selectServer(main: string, backup: string): string {
+    if (backup == '') {
+        return main
+    }
+    if (main == '') {
+        return backup
+    }
+    return isConnectedToMainNetwork() ? main : backup
+}

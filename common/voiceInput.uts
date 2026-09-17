@@ -110,7 +110,7 @@ function ensureListener(): void {
 
 /** 实时识别服务是否配置了地址 */
 function isAsrStreamConfigured(): boolean {
-    return Config.ASR_STREAM_SERVER.trim() != ''
+    return Config.getAsrStreamServer().trim() != ''
 }
 
 /**
@@ -118,7 +118,7 @@ function isAsrStreamConfigured(): boolean {
  */
 function pushConfig(): void {
     const options = {
-        asrServerUrl: Config.ASR_STREAM_SERVER,
+        asrServerUrl: Config.getAsrStreamServer(),
         asrPartialResult: Config.ENABLE_ASR_PARTIAL_RESULT,
         userId: wfc.getUserId(),
         // 气泡用主色调，对齐 android-chat 的 colorPrimary

@@ -101,7 +101,7 @@ export function employeeDefaultPortrait(name: string): string {
     if (name == '') {
         return Config.DEFAULT_PORTRAIT_URL
     }
-    return redirectMediaUrl(`${Config.APP_SERVER}/avatar?name=${encodeURIComponent(name)}`)
+    return redirectMediaUrl(`${Config.getAppServer()}/avatar?name=${encodeURIComponent(name)}`)
 }
 
 export function organizationFromJson(o: UTSJSONObject): Organization {

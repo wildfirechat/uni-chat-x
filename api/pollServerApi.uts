@@ -1,5 +1,4 @@
 import Config from "../config.uts";
-import { redirectMediaUrl } from "../common/mediaUrlRedirector.uts";
 import { AuthCodeApiClient, AuthCodeApiError } from "./authCodeApiClient.uts";
 import { Poll, PollVoterDetail, pollFromJson, pollListFromJson, pollVoterDetailListFromJson } from "./pollModel.uts";
 
@@ -12,7 +11,7 @@ import { Poll, PollVoterDetail, pollFromJson, pollListFromJson, pollVoterDetailL
  * 创建投票后**客户端不发消息** —— 服务端会自己往群里投一条 type=18 的投票消息。
  */
 export class PollServerApi {
-    private client = new AuthCodeApiClient('poll', 2, (): string => redirectMediaUrl(Config.POLL_SERVER))
+    private client = new AuthCodeApiClient('poll', 2, (): string => Config.getPollServer())
 
     /** 投票服务是否配置。没配时输入框扩展面板不显示「群投票」，消息气泡也不可点。 */
     isAvailable(): boolean {

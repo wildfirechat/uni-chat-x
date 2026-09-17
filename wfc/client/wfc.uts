@@ -47,7 +47,8 @@ import UserSettingEntry from '../model/userSettingEntry.uts';
 import PCOnlineInfo from '../model/pcOnlineInfo.uts';
 import PCOnlineType from '../model/pcOnlineType.uts';
 import ModifyMyInfoEntry from '../model/modifyMyInfoEntry.uts';
-import { redirectMediaUrl, updateConnectedNetworkType, NETWORK_TYPE_MAIN, NETWORK_TYPE_BACKUP } from '../../common/mediaUrlRedirector.uts';
+import { redirectMediaUrl } from '../../common/mediaUrlRedirector.uts';
+import { updateBackupAddressStrategy, getBackupAddressStrategy as _getBackupAddressStrategy, updateConnectedToMainNetwork, isConnectedToMainNetwork as _isConnectedToMainNetwork } from '../../common/dualNetwork.uts';
 import AddGroupMemberNotification from '../messages/notification/addGroupMemberNotification.uts';
 
 /**
@@ -110,6 +111,9 @@ export class WfcManager {
 
         this.connectionStatus = native.getConnectionStatus();
         this.isLogined = this.connectionStatus == ConnectionStatus.ConnectionStatusConnected;
+        if (this.connectionStatus == ConnectionStatus.ConnectionStatusConnected || this.connectionStatus == ConnectionStatus.ConnectionStatusReceiveing) {
+            this._refreshConnectedNetwork();
+        }
 
         this.registerDefaultMessageContents();
         console.log('wfc init end')
@@ -193,12 +197,36 @@ export class WfcManager {
         return native.getConnectionStatus();
     }
 
+    /**
+     * 设置双网环境的网络策略，仅专业版 IM 服务支持，一般用于政企单位内外网两种网络环境。
+     *
+     * @param strategy 网络策略，0 是复合连接；1 是使用主要网络；2 使用备选网络
+     */
     setBackupAddressStrategy(strategy: number): void {
+        updateBackupAddressStrategy(strategy);
         native.setBackupAddressStrategy(strategy);
     }
 
+    getBackupAddressStrategy(): number {
+        return _getBackupAddressStrategy();
+    }
+
+    /**
+     * 设置 IM 备选地址，仅专业版 IM 服务支持，要在 connect 之前调用。
+     *
+     * @param backupHost 备选网络的 IP 或域名
+     * @param backupPort 备选网络的端口
+     */
     setBackupAddress(backupHost: string, backupPort: number): void {
         native.setBackupAddress(backupHost, backupPort);
+    }
+
+    /**
+     * 双网环境时，当前是否连接到了主网络。未连接时返回最近一次连接的网络，还没有连接过时按主网络处理。
+     * 各服务地址的主备选择见 Config.getAppServer() 等方法。
+     */
+    isConnectedToMainNetwork(): boolean {
+        return _isConnectedToMainNetwork();
     }
 
     setProtoUserAgent(userAgent: string): void {
@@ -2081,7 +2109,7 @@ export class WfcManager {
         if (userInfo.updateDt == 0) {
             return Config.DEFAULT_PORTRAIT_URL
         }
-        return redirectMediaUrl(`${Config.APP_SERVER}/avatar?name=${encodeURIComponent(userInfo.displayName)}`)
+        return redirectMediaUrl(`${Config.getAppServer()}/avatar?name=${encodeURIComponent(userInfo.displayName)}`)
     }
 
     defaultGroupPortrait(groupInfo: GroupInfo): string {
@@ -2092,7 +2120,7 @@ export class WfcManager {
         let pending = false;
         for (let i = 0; i < members.length; i++) {
             const m = members[i]
-            if (m.portrait != '' && !m.portrait.startsWith(`${Config.APP_SERVER}`)) {
+            if (m.portrait != '' && !Config.isAppServerUrl(m.portrait)) {
                 reqMembers.push({ avatarUrl: m.portrait } as UTSJSONObject)
             } else {
                 reqMembers.push({ name: m.displayName } as UTSJSONObject)
@@ -2108,7 +2136,7 @@ export class WfcManager {
 
         const req = JSON.stringify({ members: reqMembers } as UTSJSONObject)!;
 
-        return redirectMediaUrl(`${Config.APP_SERVER}/avatar/group?request=${encodeURIComponent(req)}`)
+        return redirectMediaUrl(`${Config.getAppServer()}/avatar/group?request=${encodeURIComponent(req)}`)
     }
 
     // 不填充默认头像的内部版本，避免 defaultGroupPortrait 死循环
@@ -2172,7 +2200,7 @@ export class WfcManager {
                 this.onConnectionChanged(params.length > 0 ? numberValue(params[0]) : 0);
                 break;
             case 'onConnectToServer':
-                this._updateConnectedNetwork(params);
+                this._refreshConnectedNetwork();
                 this.emit(EventType.ConnectToServer, params);
                 break;
             case 'onReceiveMessage':
@@ -2234,28 +2262,19 @@ export class WfcManager {
     }
 
     /**
-     * 从 onConnectToServer 的回调参数里取「当前连的是主网还是备网」，喂给双网 URL 转换器
-     * （见 common/mediaUrlRedirector.uts）。
+     * 向协议栈查询当前连的是主网络还是备选网络，存到 common/dualNetwork.uts，服务地址选择和双网媒体 URL
+     * 转换都用它。
      *
-     * 参数形状各端不一样，也不保证带这一项：鸿蒙侧协议栈的
-     * `fun_connected_to_server_callback(host, ip, nwType)` 带（nwType: 1 主网 / -1 备网 / 0 未知，
-     * 对齐 iOS 的 `ConnectedNetworkType`），android / iOS 的 uts 插件目前**根本不抛这个事件**。
-     * 所以这里只认「明确是网络类型」的值，端口号之类的一律落到 updateConnectedNetworkType
-     * 的忽略分支，不会把网络判断带偏。
+     * 不从 onConnectToServer 的回调参数里取：各端参数形状不一样（鸿蒙是 host, ip, port, mainNw(1/0)，
+     * iOS 只有 host, ip, port），android 的插件根本不抛这个事件。
+     *
+     * 协议栈是先通知 Receiving、再确定网络类型、再回调 OnConnected，同步完才通知 Connected
+     * （proto stn_callback.cc）。所以 Connected 时查到的一定准；鸿蒙的 onConnectToServer 就是 OnConnected，
+     * 也准，能覆盖 Receiving 期间。Receiving 和 iOS 的 onConnectToServer（TCP 连上时就回调）可能还是上一次
+     * 连接的网络，和不查时沿用的值一样，查了没有坏处。
      */
-    private _updateConnectedNetwork(params: Array<any | null>): void {
-        if (params.length < 3) {
-            return;
-        }
-        const last = params[params.length - 1];
-        if (last == null) {
-            return;
-        }
-        if (typeof last == 'boolean') {
-            updateConnectedNetworkType((last as boolean) ? NETWORK_TYPE_MAIN : NETWORK_TYPE_BACKUP);
-            return;
-        }
-        updateConnectedNetworkType(numberValue(last));
+    private _refreshConnectedNetwork(): void {
+        updateConnectedToMainNetwork(native.isConnectedToMainNetwork());
     }
 
     private onConnectionChanged(status: number): void {
@@ -2263,6 +2282,9 @@ export class WfcManager {
             this.isLogined = true;
         }
         this.connectionStatus = status;
+        if (status == ConnectionStatus.ConnectionStatusConnected || status == ConnectionStatus.ConnectionStatusReceiveing) {
+            this._refreshConnectedNetwork();
+        }
         this.eventEmitter.emit(EventType.ConnectionStatusChanged, [status]);
         console.log('connection status changed', status);
         if (this.isLogined && (status == ConnectionStatus.ConnectionStatusSecretKeyMismatch || status == ConnectionStatus.ConnectionStatusRejected)) {

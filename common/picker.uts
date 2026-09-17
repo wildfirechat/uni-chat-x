@@ -25,7 +25,7 @@ export class PickUsersOptions {
     maxSelected = 1024
     /**
      * 是否显示顶部「从组织架构选择」入口。对齐 flutter 的 showOrganizationEntry。
-     * 实际是否渲染还要看 `Config.ORGANIZATION_SERVER` 有没有配 —— 没配组织服务时
+     * 实际是否渲染还要看 `Config.getOrganizationServer()` 有没有配 —— 没配组织服务时
      * 这一行点了也拉不到数据，不如不放（同 §M2「宁可不放入口」）。
      */
     showOrganizationEntry = true

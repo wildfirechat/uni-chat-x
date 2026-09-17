@@ -25,7 +25,7 @@
  *   onUnmounted(() => { offAll(subs) })
  *
  * 未包装的事件及原因：
- *   - ConnectToServer：参数形状各端不一致且不保证下发，见 wfc.uts 的 _updateConnectedNetwork 注释；
+ *   - ConnectToServer：参数形状各端不一致且不保证下发，见 wfc.uts 的 _refreshConnectedNetwork 注释；
  *   - ReceiveMessage(单条)：已废弃，用 ReceiveMessages；
  *   - MessageReceived、SecretChat* ：项目内没有订阅方（SecretChat* 连 emit 都没有），
  *     真要用的时候再按下面的样子补，别在这里堆没人用的包装。

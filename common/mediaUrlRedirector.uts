@@ -15,45 +15,7 @@
  * 新加的下载/展示路径记得也走一遍。
  */
 import Config from '../config.uts'
-
-/**
- * 当前是否连在主网。
- *
- * 长连接建立时由协议栈回调告知（见 store.uts 里 `EventType.ConnectToServer` 的订阅）。
- * 拿不到确切值时保持上一次的判断，默认按主网算 —— 单网部署下这两个前缀都没配，
- * 这个值取什么都不影响。
- */
-let connectedToMainNetwork = true
-
-/**
- * 更新当前连接的网络。`mainNetwork` 为 true 表示连在主网，false 表示连在备网。
- */
-export const setConnectedToMainNetwork = (mainNetwork: boolean): void => {
-    connectedToMainNetwork = mainNetwork
-}
-
-export const isConnectedToMainNetwork = (): boolean => {
-    return connectedToMainNetwork
-}
-
-/**
- * 协议栈 `onConnectToServer` 回调里的网络类型（对齐 iOS `ConnectedNetworkType`）：
- * 1 主网、-1 备网、0 未知。未知时不动当前判断。
- */
-export const NETWORK_TYPE_MAIN: number = 1
-export const NETWORK_TYPE_UNKNOWN: number = 0
-export const NETWORK_TYPE_BACKUP: number = -1
-
-/**
- * 把协议栈给的网络类型喂进来。0（未知）会被忽略，保持上一次的判断。
- */
-export const updateConnectedNetworkType = (nwType: number): void => {
-    if (nwType == NETWORK_TYPE_MAIN) {
-        connectedToMainNetwork = true
-    } else if (nwType == NETWORK_TYPE_BACKUP) {
-        connectedToMainNetwork = false
-    }
-}
+import { isConnectedToMainNetwork } from './dualNetwork.uts'
 
 const swapNetworkPrefix = (url: string): string => {
     const mainPrefix = Config.MAIN_MEDIA_URL_PREFIX
@@ -61,7 +23,8 @@ const swapNetworkPrefix = (url: string): string => {
     if (mainPrefix == '' || backupPrefix == '') {
         return url
     }
-    if (connectedToMainNetwork) {
+    // 当前连的是哪张网见 common/dualNetwork.uts，单网部署下两个前缀都没配，走不到这里
+    if (isConnectedToMainNetwork()) {
         // 主网下，把备网地址前缀换成主网
         if (url.indexOf(backupPrefix) == 0) {
             return mainPrefix + url.substring(backupPrefix.length)

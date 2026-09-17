@@ -50,6 +50,11 @@ onLaunch(() => {
 
     // 初始化 IM
     wfc.init();
+    // 双网环境，IM 备选地址及网络策略，要在 store.init() 自动登录 connect 之前设置
+    if (Config.IM_SERVER_BACKUP_HOST != '') {
+        wfc.setBackupAddress(Config.IM_SERVER_BACKUP_HOST, Config.IM_SERVER_BACKUP_PORT);
+        wfc.setBackupAddressStrategy(Config.BACKUP_ADDRESS_STRATEGY);
+    }
     if (Config.SEND_LOG_COMMAND != '') {
         wfc.setSendLogCommand(Config.SEND_LOG_COMMAND)
     }

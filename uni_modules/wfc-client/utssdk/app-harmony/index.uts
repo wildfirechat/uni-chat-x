@@ -643,6 +643,12 @@ export function setBackupAddressStrategy(strategy: number): void {
     clientModule.setBackupAddressStrategy(strategy)
 }
 
+// 双网环境时，当前（或最近一次）连接的是否是主网络。getConnectedNetworkType：1 主网络，-1 备选网络，0 未知；
+// 未知时和协议栈（business.cc）一样按主网络处理
+export function isConnectedToMainNetwork(): boolean {
+    return clientModule.getConnectedNetworkType() != -1
+}
+
 export function setBlackList(userId: string, block: boolean, successCB: VoidCallback, failCB: FailCallback): void {
     clientModule.setBlackList(userId, block, voidCallback(successCB), numberCallback(failCB))
 }

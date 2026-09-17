@@ -2,7 +2,8 @@ import Config from "../config.uts";
 import AppServerError from "./appServerError.uts";
 import wfc from "../wfc/client/wfc.uts";
 import { getItem, setItem } from "../pages/util/storageHelper.uts";
-import { redirectMediaUrl } from "../common/mediaUrlRedirector.uts";
+import ConnectionStatus from "../wfc/client/connectionStatus.uts";
+import { getBackupAddressStrategy, BACKUP_ADDRESS_STRATEGY_AUTO } from "../common/dualNetwork.uts";
 
 /**
  * 登录结果
@@ -69,6 +70,106 @@ function getAuthTokenFromHeader(header: UTSJSONObject | null): string | null {
     }
     console.log('unexpected authToken type in response header', value)
     return null
+}
+
+/**
+ * 登录前等 IM 未连接时，探测到的可用应用服务地址，'' 表示还没有探测结果
+ */
+let probedAppServer = ''
+/** 正在进行的探测，探测期间的请求都等这次探测结果 */
+let pendingAppServerProbe: Promise<string> | null = null
+
+/**
+ * 探测一个应用服务地址是否可达。应用服务根路径返回 Ok，只认它，避免被网关、代理之类返回的 200 误判
+ */
+function probeAppServer(address: string): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+        uni.request<string>({
+            url: address,
+            method: 'GET',
+            responseType: 'text',
+            timeout: 5000,
+            success: (res) => {
+                resolve(res.statusCode == 200 && (res.data ?? '').trim() == 'Ok')
+            },
+            fail: (err) => {
+                console.log('probe app server fail', address, err.errMsg)
+                resolve(false)
+            }
+        } as RequestOptions<string>)
+    })
+}
+
+/**
+ * 主备网络是隔离的，一般只有一个地址可达，并行探测主备地址，用首个可达的地址。
+ * 都探测失败时回退到主地址，让后续请求正常报错，不缓存
+ */
+function probeAppServers(): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        let pendingCount = 2
+        let resolved = false
+        const onResult = (address: string, reachable: boolean): void => {
+            pendingCount--
+            if (resolved) {
+                return
+            }
+            if (reachable) {
+                resolved = true
+                probedAppServer = address
+                resolve(address)
+            } else if (pendingCount == 0) {
+                resolved = true
+                resolve(Config.APP_SERVER)
+            }
+        }
+        probeAppServer(Config.APP_SERVER).then((reachable: boolean): void => {
+            onResult(Config.APP_SERVER, reachable)
+        })
+        probeAppServer(Config.APP_SERVER_BACKUP).then((reachable: boolean): void => {
+            onResult(Config.APP_SERVER_BACKUP, reachable)
+        })
+    })
+}
+
+/**
+ * 获取当前应使用的应用服务地址。对齐 android-chat `AppService.appServerAddress(callback)`。
+ *
+ * IM 已连接时，直接用 IM 连接的网络选（Config.getAppServer）；IM 未连接时（登录前），网络未知，
+ * 探测主备地址。探测结果会缓存，避免每次请求都探测；请求出现网络错误时清除缓存，下次请求重新探测。
+ * 不是双网环境，或者指定了网络策略时，不用探测。
+ */
+export function resolveAppServer(): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        if (Config.APP_SERVER == '' || Config.APP_SERVER_BACKUP == '' || getBackupAddressStrategy() != BACKUP_ADDRESS_STRATEGY_AUTO) {
+            resolve(Config.getAppServer())
+            return
+        }
+        const status = wfc.getConnectionStatus()
+        if (status == ConnectionStatus.ConnectionStatusConnected || status == ConnectionStatus.ConnectionStatusReceiveing) {
+            // IM 连接后以 IM 连接的网络为准，清除探测结果，IM 断开后（如退出登录）重新探测
+            probedAppServer = ''
+            resolve(Config.getAppServer())
+            return
+        }
+        if (probedAppServer != '') {
+            resolve(probedAppServer)
+            return
+        }
+        if (pendingAppServerProbe == null) {
+            pendingAppServerProbe = probeAppServers()
+        }
+        pendingAppServerProbe!.then((address: string): void => {
+            pendingAppServerProbe = null
+            resolve(address)
+        })
+    })
+}
+
+/**
+ * 请求出现网络错误，可能是网络环境变了，清除探测结果，下次请求重新探测
+ */
+function onAppServerNetworkError(): void {
+    probedAppServer = ''
 }
 
 export class AppServerApi {
@@ -235,47 +336,50 @@ export class AppServerApi {
 
     private _login(path: string, data: UTSJSONObject): Promise<LoginResult> {
         return new Promise<LoginResult>((resolve, reject) => {
-            uni.request<UTSJSONObject>({
-                url: redirectMediaUrl(Config.APP_SERVER + path),
-                data: data,
-                header: {
-                    'content-type': 'application/json',
-                } as UTSJSONObject,
-                method: 'POST',
-                success: (res) => {
-                    if (res.statusCode == 200) {
-                        const body = res.data
-                        if (body == null) {
-                            reject(new AppServerError(-1, '响应为空'));
-                            return
-                        }
-                        const code = body.getNumber('code') ?? -1
-                        if (code == 0) {
-                            const header = res.header as UTSJSONObject | null
-                            const appAuthToken = getAuthTokenFromHeader(header)
-                            if (appAuthToken != null) {
-                                setItem('authToken-app', appAuthToken);
+            resolveAppServer().then((appServer: string): void => {
+                uni.request<UTSJSONObject>({
+                    url: appServer + path,
+                    data: data,
+                    header: {
+                        'content-type': 'application/json',
+                    } as UTSJSONObject,
+                    method: 'POST',
+                    success: (res) => {
+                        if (res.statusCode == 200) {
+                            const body = res.data
+                            if (body == null) {
+                                reject(new AppServerError(-1, '响应为空'));
+                                return
                             }
-                            const result = body.getJSON('result')
-                            const loginResult = new LoginResult()
-                            if (result != null) {
-                                loginResult.userId = result.getString('userId') ?? ''
-                                loginResult.token = result.getString('token') ?? ''
-                                loginResult.register = result.getBoolean('register') ?? false
+                            const code = body.getNumber('code') ?? -1
+                            if (code == 0) {
+                                const header = res.header as UTSJSONObject | null
+                                const appAuthToken = getAuthTokenFromHeader(header)
+                                if (appAuthToken != null) {
+                                    setItem('authToken-app', appAuthToken);
+                                }
+                                const result = body.getJSON('result')
+                                const loginResult = new LoginResult()
+                                if (result != null) {
+                                    loginResult.userId = result.getString('userId') ?? ''
+                                    loginResult.token = result.getString('token') ?? ''
+                                    loginResult.register = result.getBoolean('register') ?? false
+                                }
+                                resolve(loginResult);
+                            } else {
+                                reject(new AppServerError(code, body.getString('message') ?? ''));
                             }
-                            resolve(loginResult);
                         } else {
-                            reject(new AppServerError(code, body.getString('message') ?? ''));
+                            reject(new AppServerError(-1, 'request error, status code: ' + res.statusCode));
                         }
-                    } else {
-                        reject(new AppServerError(-1, 'request error, status code: ' + res.statusCode));
+                    },
+                    fail: (err) => {
+                        console.log('login request fail', err);
+                        onAppServerNetworkError();
+                        reject(new AppServerError(-1, 'request error: ' + err.errMsg));
                     }
-                },
-                fail: (err) => {
-                    console.log('login request fail', err);
-                    reject(new AppServerError(-1, 'request error: ' + err.errMsg));
-                }
-            } as RequestOptions<UTSJSONObject>);
+                } as RequestOptions<UTSJSONObject>);
+            })
         })
     }
 
@@ -296,38 +400,41 @@ export class AppServerApi {
      */
     _postForBody(path: string, data: UTSJSONObject): Promise<UTSJSONObject | null> {
         return new Promise<UTSJSONObject | null>((resolve, reject) => {
-            const url = redirectMediaUrl(Config.APP_SERVER + path);
-            console.log('_post', url);
-            uni.request<UTSJSONObject>({
-                url: url,
-                data: data,
-                header: {
-                    'content-type': 'application/json',
-                    'authToken': getItem('authToken-app'),
-                } as UTSJSONObject,
-                method: 'POST',
-                success: (res) => {
-                    if (res.statusCode == 200) {
-                        const body = res.data
-                        if (body == null) {
-                            resolve(null);
-                            return
-                        }
-                        const code = body.getNumber('code') ?? -1
-                        if (code == 0) {
-                            resolve(body);
+            resolveAppServer().then((appServer: string): void => {
+                const url = appServer + path;
+                console.log('_post', url);
+                uni.request<UTSJSONObject>({
+                    url: url,
+                    data: data,
+                    header: {
+                        'content-type': 'application/json',
+                        'authToken': getItem('authToken-app'),
+                    } as UTSJSONObject,
+                    method: 'POST',
+                    success: (res) => {
+                        if (res.statusCode == 200) {
+                            const body = res.data
+                            if (body == null) {
+                                resolve(null);
+                                return
+                            }
+                            const code = body.getNumber('code') ?? -1
+                            if (code == 0) {
+                                resolve(body);
+                            } else {
+                                reject(new AppServerError(code, body.getString('message') ?? ''))
+                            }
                         } else {
-                            reject(new AppServerError(code, body.getString('message') ?? ''))
+                            reject(new AppServerError(-1, 'request error, status code: ' + res.statusCode))
                         }
-                    } else {
-                        reject(new AppServerError(-1, 'request error, status code: ' + res.statusCode))
+                    },
+                    fail: (err) => {
+                        console.log('_post fail', err);
+                        onAppServerNetworkError();
+                        reject(new AppServerError(-1, 'request error: ' + err.errMsg))
                     }
-                },
-                fail: (err) => {
-                    console.log('_post fail', err);
-                    reject(new AppServerError(-1, 'request error: ' + err.errMsg))
-                }
-            } as RequestOptions<UTSJSONObject>);
+                } as RequestOptions<UTSJSONObject>);
+            })
         });
     }
 }

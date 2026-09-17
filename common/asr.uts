@@ -32,7 +32,7 @@ export function getAsrAuthCode(successCB: (authCode: string) => void, failCB: (e
 
 /** ASR 是否可用。服务地址置空时，消息长按菜单里不显示「语音转文字」。 */
 export function isAsrEnabled(): boolean {
-    return Config.ASR_SERVER.trim() != ''
+    return Config.getAsrServer().trim() != ''
 }
 
 /**
@@ -71,7 +71,7 @@ export function speechToText(audioUrl: string, successCB: ((text: string) => voi
     }
     getAsrAuthCode((authCode: string) => {
         uni.request<string>({
-            url: Config.ASR_SERVER,
+            url: Config.getAsrServer(),
             method: 'POST',
             // 响应是 SSE 文本，不是 JSON，必须按文本收，否则各端解析行为不一致
             responseType: 'text',

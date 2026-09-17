@@ -8,6 +8,7 @@
 import {StringCallback, VoidCallback, FailCallback, SuccessCallback} from '../interface.uts';
 
 import { WFClientModule} from 'WFClientUniPlugin';
+import { WFCCNetworkService } from 'WFChatClient';
 /**
  * 引入三方库
  * [可选实现，按需引入]
@@ -550,6 +551,11 @@ export function setBackupAddress(backupHost: string, backupPort: number): void {
 
 export function setBackupAddressStrategy(strategy: number): void {
     clientModule.setBackupAddressStrategy(strategy.toInt32())
+}
+
+// 双网环境时，当前（或最近一次）连接的是否是主网络。WFClientModule 没有封装，直接问 WFCCNetworkService
+export function isConnectedToMainNetwork(): boolean {
+    return WFCCNetworkService.sharedInstance()!.connectedToMainNetwork
 }
 
 export function setBlackList(userId: string, block: boolean,  @escaping successCB: VoidCallback,  @escaping failCB: FailCallback): void {

@@ -202,7 +202,7 @@ const moreMenuItems = computed<PopupMenuItem[]>((): PopupMenuItem[] => {
  * 没配组织服务就整段不展示。
  */
 const loadOrganizations = (userId: string) => {
-    if (Config.ORGANIZATION_SERVER == '') {
+    if (Config.getOrganizationServer() == '') {
         return
     }
     organizationServerApi.getEmployeeExInfo(userId)

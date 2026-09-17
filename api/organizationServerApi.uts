@@ -16,12 +16,13 @@ export class OrganizationServerApi {
 
     login(): Promise<UTSJSONObject | null> {
         return new Promise<UTSJSONObject | null>((resolve, reject) => {
-            if (Config.ORGANIZATION_SERVER == '') {
+            const organizationServer = Config.getOrganizationServer()
+            if (organizationServer == '') {
                 reject(new OrganizationServerError(-1, '未配置组织结构服务'));
                 return
             }
             wfc.getAuthCode('admin', 2, '', (code: string) => {
-                const path = Config.ORGANIZATION_SERVER + '/api/user_login';
+                const path = organizationServer + '/api/user_login';
                 uni.request<UTSJSONObject>({
                     url: path,
                     data: { authCode: code } as UTSJSONObject,
@@ -159,7 +160,7 @@ export class OrganizationServerApi {
      */
     _post(path: string, data: UTSJSONObject): Promise<any | null> {
         return new Promise<any | null>((resolve, reject) => {
-            const url = Config.ORGANIZATION_SERVER + path;
+            const url = Config.getOrganizationServer() + path;
             uni.request<UTSJSONObject>({
                 url: url,
                 data: data,

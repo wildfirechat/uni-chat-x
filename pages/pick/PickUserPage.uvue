@@ -208,7 +208,7 @@ onLoad((_options: OnLoadOptions) => {
             pageTitle.value = options.title
         }
         // 没配组织服务时这一行点了也拉不到数据，直接不放
-        showOrganizationEntry.value = options.showOrganizationEntry && Config.ORGANIZATION_SERVER != ''
+        showOrganizationEntry.value = options.showOrganizationEntry && Config.getOrganizationServer() != ''
     }
 })
 
