@@ -94,7 +94,7 @@ function certificatePaths(certificates: string[]): string[] {
             paths.push(cert)
             continue
         }
-        const path = NSTemporaryDirectory() + 'wfc_pinned_' + i + '.pem'
+        const path = NSTemporaryDirectory() + 'wfc_pinned_' + i.toString() + '.pem'
         const data = NSString(string=cert).data(using=String.Encoding.utf8.rawValue)
         if (FileManager.default.createFile(atPath=path, contents=data, attributes=null)) {
             paths.push(path)
