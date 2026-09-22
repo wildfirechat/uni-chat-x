@@ -50,6 +50,13 @@ onLaunch(() => {
 
     // 初始化 IM
     wfc.init();
+    // IM 长连接协议（websocket / TLS），协议栈在 connect 时才初始化，要在 store.init() 自动登录 connect 之前设置
+    if (Config.IM_USE_WEBSOCKET) {
+        wfc.setUseWebsocket(true);
+    }
+    if (Config.IM_USE_TLS) {
+        wfc.useTls(Config.IM_TLS_SKIP_VERIFY_CERT, Config.IM_TRUST_CERTIFICATES);
+    }
     // 双网环境，IM 备选地址及网络策略，要在 store.init() 自动登录 connect 之前设置
     if (Config.IM_SERVER_BACKUP_HOST != '') {
         wfc.setBackupAddress(Config.IM_SERVER_BACKUP_HOST, Config.IM_SERVER_BACKUP_PORT);

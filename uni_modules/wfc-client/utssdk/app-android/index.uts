@@ -11,6 +11,10 @@ import {StringCallback, VoidCallback, FailCallback, SuccessCallback} from '../in
 
 import ClientModule from 'cn.wildfirechat.uni.client.ClientModule';
 import ChatManager from 'cn.wildfirechat.remote.ChatManager';
+import Mars from 'com.tencent.mars.Mars';
+import ProtoLogic from 'com.tencent.mars.proto.ProtoLogic';
+import File from 'java.io.File';
+import FileWriter from 'java.io.FileWriter';
 
 import Int from "kotlin.Int";
 import Looper from 'android.os.Looper';
@@ -102,6 +106,52 @@ export function registerMessageFlag(type: number, flag: number) {
 
 export function useSM4() {
     clientModule.useSM4()
+}
+
+// websocket / TLS 开关 ClientModule、ChatManager 都没有封装，直接调协议栈的 ProtoLogic。
+// 协议栈在 ClientService.initProto（connect 时）才 Mars.onCreate，在那之前设置都有效。
+// 但 native 库要等 ClientService.onCreate 才加载，initProto 里刚 bindService、ClientService 还没创建，
+// 所以先自己加载一次（System.loadLibrary 重复调用没有副作用），否则调 ProtoLogic 会 UnsatisfiedLinkError。
+export function setUseWebsocket(useWebsocket: boolean) {
+    Mars.loadDefaultMarsLibrary()
+    ProtoLogic.setUseWebsocket(useWebsocket)
+}
+
+export function isUseWebsocket(): boolean {
+    Mars.loadDefaultMarsLibrary()
+    return ProtoLogic.isUseWebsocket()
+}
+
+export function useTls(skipVerifyCert: boolean, certificates: string[]) {
+    Mars.loadDefaultMarsLibrary()
+    ProtoLogic.useTls(skipVerifyCert, certificatePaths(certificates).toTypedArray())
+}
+
+// ProtoLogic.useTls 只接受证书文件路径：PEM 内容先写到 filesDir/certs 下再传路径，其余按文件路径原样传
+function certificatePaths(certificates: string[]): string[] {
+    let paths: string[] = []
+    const certDir = new File(UTSAndroid.getAppContext()!.getFilesDir(), 'certs')
+    for (let i = 0; i < certificates.length; i++) {
+        const cert = certificates[i]
+        if (cert == '') {
+            continue
+        }
+        if (!cert.includes('-----BEGIN CERTIFICATE-----')) {
+            paths.push(cert)
+            continue
+        }
+        try {
+            certDir.mkdirs()
+            const certFile = new File(certDir, 'wfc_pinned_' + i + '.pem')
+            const writer = new FileWriter(certFile)
+            writer.write(cert)
+            writer.close()
+            paths.push(certFile.getAbsolutePath())
+        } catch (e) {
+            console.error('save pem certificate fail', e)
+        }
+    }
+    return paths
 }
 
 export function setSendLogCommand(command: string) {
