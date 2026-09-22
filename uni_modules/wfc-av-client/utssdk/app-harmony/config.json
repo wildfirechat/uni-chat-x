@@ -1,6 +1,6 @@
 {
   "dependencies": {
     "@wfc/avenginekit": "./libs/avenginekit.har",
-    "@ohos/webrtc": "^1.0.0-rc3"
+    "@ohos/webrtc": "^1.0.1-rc2"
   }
 }
