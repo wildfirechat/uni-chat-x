@@ -8,6 +8,8 @@
 import {StringCallback, VoidCallback, FailCallback, SuccessCallback} from '../interface.uts';
 
 import { WFClientModule} from 'WFClientUniPlugin';
+import { WFCCNetworkService } from 'WFChatClient';
+import { FileManager, NSString, NSTemporaryDirectory } from 'Foundation';
 /**
  * 引入三方库
  * [可选实现，按需引入]
@@ -64,6 +66,43 @@ export function registerMessageFlag(type: number, flag: number) {
 
 export function useSM4() {
     clientModule.useSM4();
+}
+
+// websocket / TLS 开关 WFClientModule 没有封装，直接调 WFCCNetworkService。
+// 协议栈在 connect 时才 createMars，在那之前设置都有效
+export function setUseWebsocket(useWebsocket: boolean) {
+    WFCCNetworkService.sharedInstance()!.setUseWebsocket(useWebsocket);
+}
+
+export function isUseWebsocket(): boolean {
+    return WFCCNetworkService.sharedInstance()!.isUseWebsocket();
+}
+
+export function useTls(skipVerifyCert: boolean, certificates: string[]) {
+    WFCCNetworkService.sharedInstance()!.useTls(skipVerifyCert, selfSignedCerts=certificatePaths(certificates));
+}
+
+// UseTls 只接受证书文件路径：PEM 内容先写到临时目录再传路径，其余按文件路径原样传
+function certificatePaths(certificates: string[]): string[] {
+    let paths: string[] = []
+    for (let i = 0; i < certificates.length; i++) {
+        const cert = certificates[i]
+        if (cert == '') {
+            continue
+        }
+        if (!cert.includes('-----BEGIN CERTIFICATE-----')) {
+            paths.push(cert)
+            continue
+        }
+        const path = NSTemporaryDirectory() + 'wfc_pinned_' + i + '.pem'
+        const data = NSString(string=cert).data(using=String.Encoding.utf8.rawValue)
+        if (FileManager.default.createFile(atPath=path, contents=data, attributes=null)) {
+            paths.push(path)
+        } else {
+            console.error('save pem certificate fail', path)
+        }
+    }
+    return paths
 }
 
 export function setSendLogCommand(command: string) {

@@ -1,3 +1,26 @@
+// 私有化部署用的自签 CA（CN=wildfire-im，有效期到 3025 年），和 android-chat 的
+// client/src/main/assets/certs/server.crt 是同一张。换证书时整段替换，BEGIN/END 两行和换行都要保留
+const WILDFIRE_IM_CA = `-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUTvoohZOCfbuuAVKBOUuoAv4LwnowDQYJKoZIhvcNAQEL
+BQAwFjEUMBIGA1UEAwwLd2lsZGZpcmUtaW0wIBcNMjYwOTE5MDkxNzIwWhgPMzAy
+NTA5MTkwOTE3MjBaMBYxFDASBgNVBAMMC3dpbGRmaXJlLWltMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiWPb/pvXBQB458wnYip8rX4Djf/U9kk/HKKu
+25Unkr7Oh2w1y6N+XYcI0xvqEOGKY7S3K8QBcswXaL6uk3wVMSzYd2T6rq6wWcZI
+Uhb/dN0IoEoV463yRDgpTMXfbZMYaOQqRFPAc9EnCqwsdkzruAW8Lhv1cznU2/zU
+VvFPih9dzOMWZTrTIo8QQIHwQehBQNXdg9sUJGwtRsjVkyaivI9kmaiTo1VSbgdX
+kNweR9uDtLSd50wqLIQJXuG1Xf8TPuT54uVShdNoGnrCPAPqEq2afWwSf3MC1sJd
+DNDdjuaD/xp8tyJyAQmsmv8NCVBb/88c24Xicr0e7YpO2VqwaQIDAQABo1MwUTAd
+BgNVHQ4EFgQURs40lxud5zo9uAbN8j1eqlWvdC0wHwYDVR0jBBgwFoAURs40lxud
+5zo9uAbN8j1eqlWvdC0wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAZPrhpDdLlkOBxe6g7OjKeaT84Ao74bm+sEOu1pL1aiHojFSTpGql7kaY/+aT
+7zS/7/Oivjj3f0fhYp3Yi6GVgIZJUbeeeLdqrEm05iXPrhuJyiSP+Ed470W4fLrV
+ORAJuza34hSoSHRDDfyKBZMup5pmG0E9Wtr04ZwaGEZ5fXzlu1Ur3wVnAwbkClga
++EmZ1641Cp8F4ChnA301GBUOv58bpB1XFkzu66GLbhVAUaO44JT856fezCQOuJVX
+DNVRsJpfSCRfd75ZMtbQK9YKIYEgQSs7353tPhi5OR9qu4gREqnMhxwY3c5bLa73
+Eq1JW0mjoqaUbiXr6zOxyauOIA==
+-----END CERTIFICATE-----
+`
+
 export default class Config {
     // 调试用
     static ENABLE_AUTO_LOGIN = true;
@@ -36,6 +59,26 @@ export default class Config {
     // 仅仅是 HOST，没有 http 前缀，后面也没有端口
     // IM SERVER 的 host 地址，一定要和 APP_SERVER 对应起来，即 APP_SERVER 上配置的 im-server 和下面所配置的im-server 是同一个
     static IM_SERVER_HOST = 'wildfirechat.net'/** 请仔细看上面的注释，仅仅是 HOST，没有 http 前缀，后面也没有端口 **/;
+
+    // ==================== IM 长连接协议（websocket / TLS） ====================
+    // 以下几项都是协议栈的连接前配置，App 启动时在 wfc.init() 之后、任何 connect 之前统一应用（见 main.js），
+    // 登录之后再改不会生效。需要 2026.9.11 之后的专业版 IM 服务。
+    // 单端口 wss 部署（所有请求都经 nginx 的 443 端口转发）时，IM_USE_WEBSOCKET 和 IM_USE_TLS 都要打开，
+    // 且 IM 服务配置文件里的 http_port 必须配置为 443。
+
+    // 是否使用 websocket 作为 IM 长连接
+    static IM_USE_WEBSOCKET = false;
+    // 是否开启 TLS（wss/https）。开启后协议栈的路由请求默认走 443 端口
+    static IM_USE_TLS = false;
+    // TLS 是否跳过服务端证书校验。true 时只加密不校验，有中间人攻击风险，仅用于自签证书时临时验证连通性
+    static IM_TLS_SKIP_VERIFY_CERT = true;
+    // 额外信任的私有/自签证书，公签证书不需要配置。每个元素既可以是 PEM 内容（插件会落到应用私有目录再交给协议栈），
+    // 也可以是证书文件的绝对路径。注意：证书内容/路径不对时，协议栈加载失败会直接退出进程。
+    // 协议栈先用系统信任库校验，不通过时再用这里的证书兜底，所以公签证书的服务配置了也没影响。
+    // 自签证书建议直接贴 PEM 内容（见上面的 WILDFIRE_IM_CA）：static 目录在 Android（assets）
+    // 和鸿蒙（rawfile）上都不是真实文件路径，没法直接传给协议栈
+    // static IM_TRUST_CERTIFICATES = [WILDFIRE_IM_CA];
+    static IM_TRUST_CERTIFICATES = [];
 
     static QR_CODE_PREFIX_PC_SESSION = "wildfirechat://pcsession/";
 

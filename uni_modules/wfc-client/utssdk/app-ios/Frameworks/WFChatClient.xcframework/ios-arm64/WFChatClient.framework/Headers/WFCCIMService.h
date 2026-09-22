@@ -1409,6 +1409,10 @@ typedef NS_ENUM(NSInteger, WFCCFileRecordOrder) {
 - (BOOL)isSupportBigFilesUpload;
 
 /**
+ 是否强制大文件上传
+ */
+- (BOOL)isForcePresignedUrlUpload;
+/**
  删除本地消息
  
  @param messageId 消息ID
@@ -2529,6 +2533,15 @@ typedef NS_ENUM(NSInteger, WFCCFileRecordOrder) {
  @return scope对应的所有设置值
  */
 - (NSDictionary<NSString *, NSString *> *)getUserSettings:(UserSettingScope)scope;
+
+/**
+ 获取个人一类设置
+ 
+ @param scope 设置项的scope
+ @param prefix 设置项的key的前缀
+ @return 符合条件的所有设置值
+ */
+- (NSDictionary<NSString *, NSString *> *)getUserSettings:(UserSettingScope)scope keyPrefix:(NSString *)prefix;
 
 /**
  设置个人设置项

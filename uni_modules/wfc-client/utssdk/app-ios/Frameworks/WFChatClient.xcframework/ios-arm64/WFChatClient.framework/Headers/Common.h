@@ -51,6 +51,9 @@
 //消息未能送达消息
 #define MESSAGE_CONTENT_NOT_DELIVERED 16
 
+//流式文本取消消息（生成无产出/失败时发送，客户端按 streamId 删除对应的生成中/已生成消息，自身不落库）
+#define MESSAGE_CONTENT_TYPE_STREAMING_TEXT_CANCELLED 20
+
 //Dumy1
 #define MESSAGE_CONTENT_TYPE_DUMY1 21
 
@@ -71,6 +74,9 @@
 
 //同步标记未读
 #define MESSAGE_CONTENT_TYPE_MARK_UNREAD_SYNC 31
+
+//更新消息类型，仅在服务端使用，客户端不使用
+#define MESSAGE_CONTENT_UPDATE 32
 
 #define MESSAGE_CONTENT_TYPE_CREATE_SECRET_CHAT 40
 #define MESSAGE_CONTENT_TYPE_ACCEPT_SECRET_CHAT 41

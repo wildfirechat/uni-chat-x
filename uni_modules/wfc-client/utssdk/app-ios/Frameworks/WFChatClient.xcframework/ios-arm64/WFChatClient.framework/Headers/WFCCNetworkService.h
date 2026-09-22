@@ -402,6 +402,16 @@ typedef NS_ENUM(NSInteger, ConnectedNetworkType) {
 - (void)useAES256;
 
 /**
+ 使用数据校验。开启后会对数据进行完整性校验。注意必须和服务器同时配置，否则无法连接。
+ */
+- (void)setDataVerify:(BOOL)enabled;
+
+/**
+ 设置加密最大时间段（分钟）。注意必须和服务器同时配置，否则无法连接。
+ */
+- (void)setEncryptMaxMinutes:(int)minutes;
+
+/**
  使用TCP的短连接。需要专业版IM服务支持。
  */
 - (void)useTcpShortLink;
@@ -412,6 +422,21 @@ typedef NS_ENUM(NSInteger, ConnectedNetworkType) {
  @return 是否使用TCP短连接
  */
 - (BOOL)isTcpShortLink;
+
+/**
+ 使用websocket连接。需要专业版IM服务支持（2026.9.11及之后的版本）。
+ 注意：必须在connect之前调用，协议栈初始化时会确定长连接的类型，之后再调用不会生效。
+
+ @param useWebsocket 是否使用websocket
+ */
+- (void)setUseWebsocket:(BOOL)useWebsocket;
+
+/**
+ 是否使用websocket连接。
+
+ @return 是否使用websocket
+ */
+- (BOOL)isUseWebsocket;
 
 /**
  不使用FTS搜索。仅在connect之前调用有效。

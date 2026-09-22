@@ -84,6 +84,32 @@ export class WfcManager {
 	}
 
     /**
+     * 使用 websocket 作为 IM 长连接，需要 2026.9.11 之后的专业版 IM 服务。
+     * 必须在 connect 之前调用：长连接类型在协议栈初始化时确定，连接建立之后再切换不会生效。
+     * @param {boolean} useWebsocket
+     */
+    setUseWebsocket(useWebsocket) {
+        utsWfcClient.setUseWebsocket(useWebsocket);
+    }
+
+    /**
+     * @return {boolean}
+     */
+    isUseWebsocket() {
+        return utsWfcClient.isUseWebsocket();
+    }
+
+    /**
+     * 开启 TLS（wss/https），需要专业版 IM 服务并开启 TLS 功能。必须在 connect 之前调用。
+     *
+     * @param {boolean} skipVerifyCert 是否跳过服务端证书校验，true 时只加密不校验，有中间人攻击风险
+     * @param {string[]} certificates 额外信任的私有/自签证书，元素既可以是 PEM 内容，也可以是证书文件路径；公签证书传空数组
+     */
+    useTls(skipVerifyCert, certificates) {
+        utsWfcClient.useTls(skipVerifyCert, certificates);
+    }
+
+    /**
      * 连接服务器
      * @param {string} userId 用户id
      * @param {string} token 用户token，生成token时，所使用的clientId，一定要通过{@link getClientId}获取

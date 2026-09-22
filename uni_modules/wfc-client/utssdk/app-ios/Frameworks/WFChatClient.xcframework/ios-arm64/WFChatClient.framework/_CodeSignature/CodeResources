@@ -6,7 +6,7 @@
 	<dict>
 		<key>Headers/Common.h</key>
 		<data>
-		wGaJOYIhfa6w4EoMA7ol3ZRZiBg=
+		BXoRGiXkcXGqA6elLa2i9pLh2wg=
 		</data>
 		<key>Headers/WFCCAddGroupeMemberNotificationContent.h</key>
 		<data>
@@ -39,6 +39,14 @@
 		<key>Headers/WFCCCardMessageContent.h</key>
 		<data>
 		Hl6e1zMZnHARRV/0pP22uW0zNlc=
+		</data>
+		<key>Headers/WFCCCertificateManager+IM.h</key>
+		<data>
+		sqLBQHtTLR1FNYZJj/pgc+j9khw=
+		</data>
+		<key>Headers/WFCCCertificateManager.h</key>
+		<data>
+		YMs5HhNZxLZ9yfxJZdDV6/9RuWw=
 		</data>
 		<key>Headers/WFCCChangeGroupNameNotificationContent.h</key>
 		<data>
@@ -194,7 +202,7 @@
 		</data>
 		<key>Headers/WFCCIMService.h</key>
 		<data>
-		qXf8uI49b/wJtbSjpd5Vh+F8qEw=
+		Exh0+iELgWSuXZmthBP+TBfE4kc=
 		</data>
 		<key>Headers/WFCCImageMessageContent.h</key>
 		<data>
@@ -270,7 +278,7 @@
 		</data>
 		<key>Headers/WFCCNetworkService.h</key>
 		<data>
-		XhqRN0KppAcYU+xmHYcDKet4wSU=
+		NRUAqr37DMHZoY32ftSYfJL9+rQ=
 		</data>
 		<key>Headers/WFCCNotDeliveredMessageContent.h</key>
 		<data>
@@ -360,6 +368,10 @@
 		<data>
 		RAl4w/bqWh+smqw9zyeBe9/c3H4=
 		</data>
+		<key>Headers/WFCCStreamingTextCancelledMessageContent.h</key>
+		<data>
+		wcInBd8X0otFoF8jDX8rP5fu1mw=
+		</data>
 		<key>Headers/WFCCStreamingTextGeneratedMessageContent.h</key>
 		<data>
 		Fv+wvOS00jkVLoCAnFyK9I3BF/g=
@@ -422,11 +434,19 @@
 		</data>
 		<key>Headers/WFCChatClient.h</key>
 		<data>
-		iCzHWjmgWv3ow5fypeNNHGT2cGk=
+		pBnyzrau1DBEVLHK78awopQyr1o=
+		</data>
+		<key>Headers/WFChatClient.h</key>
+		<data>
+		pBnyzrau1DBEVLHK78awopQyr1o=
 		</data>
 		<key>Info.plist</key>
 		<data>
-		a/teuOqCJgmnzq5ZyvY7XfyBT4A=
+		RcZT/Gk2PSgnhWSniJMfoesik3w=
+		</data>
+		<key>Modules/module.modulemap</key>
+		<data>
+		78il+mARyylT1he4JY4HIZ0WhF4=
 		</data>
 		<key>en.lproj/wfc_client.strings</key>
 		<dict>
@@ -462,7 +482,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			MKE3JQ7ulMiYbRXCxfXGyqLUcxq8gisUcFt8kTQmotI=
+			MqcihwhaBfLVpDVaZluKGXq5sxBAxsKF3IFKI3cke6Q=
 			</data>
 		</dict>
 		<key>Headers/WFCCAddGroupeMemberNotificationContent.h</key>
@@ -519,6 +539,20 @@
 			<key>hash2</key>
 			<data>
 			ZoU9cqNIFYZOPzL6ndiJPN2s7f+BhiB9xBaL4eXipKM=
+			</data>
+		</dict>
+		<key>Headers/WFCCCertificateManager+IM.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			0wSPEmNlFyS/l/yUqh5xEt/eiPlQV0xp3J1RFZxu0eU=
+			</data>
+		</dict>
+		<key>Headers/WFCCCertificateManager.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			hJiM4J7SxmsRScz35Q2f6yBtJd0LfdWlWyU3Ucr3MDE=
 			</data>
 		</dict>
 		<key>Headers/WFCCChangeGroupNameNotificationContent.h</key>
@@ -791,7 +825,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			mETmUKJcA5pv8w4EbaLYEpjAbE5w7764DiTS3Il8VYk=
+			TsqAGc3tH+Rpb4DuUy9d+DqmJaMGbV5SXZgnC0veMf4=
 			</data>
 		</dict>
 		<key>Headers/WFCCImageMessageContent.h</key>
@@ -924,7 +958,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			l6SlP3ynPzupPJnuCMk47IoPMpfrI92U/7qjGrYXxOE=
+			BucyqUTm/3rtK8Mccin59V4pSGo8oyZRU++uIoOYTA0=
 			</data>
 		</dict>
 		<key>Headers/WFCCNotDeliveredMessageContent.h</key>
@@ -1081,6 +1115,13 @@
 			u+ZA58dpp4fGpgt9h83RjYiUjhMSYvcikS6w3S8O0co=
 			</data>
 		</dict>
+		<key>Headers/WFCCStreamingTextCancelledMessageContent.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			uAAtDQ7E00dA6bD0yXRE3vlF82qPTEsMoByW41A00FM=
+			</data>
+		</dict>
 		<key>Headers/WFCCStreamingTextGeneratedMessageContent.h</key>
 		<dict>
 			<key>hash2</key>
@@ -1190,7 +1231,21 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			GUveTUBuyeXXgkzbAel14UYW86bIxEGFVmWQw8TVTFs=
+			CUvfzs+ecM7Gbm0jaYIYWbeeZhqp8qqgjUS8mB4ZAlE=
+			</data>
+		</dict>
+		<key>Headers/WFChatClient.h</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			CUvfzs+ecM7Gbm0jaYIYWbeeZhqp8qqgjUS8mB4ZAlE=
+			</data>
+		</dict>
+		<key>Modules/module.modulemap</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			8y6i3tyZZ0tFLET2B62dFFhuQhe3L8JcTTWpv0ZrhC0=
 			</data>
 		</dict>
 		<key>en.lproj/wfc_client.strings</key>

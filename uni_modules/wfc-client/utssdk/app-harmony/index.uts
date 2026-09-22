@@ -1,6 +1,6 @@
 /* 引入 interface.uts 文件中定义的变量 */
 
-import clientModule, {sendMessageEx, setSendLogCommand as _setSendLogCommand, saveToFile as _saveToFile, uploadMediaFile as _uploadMediaFile} from "@wfc/marswrapper"
+import clientModule, {sendMessageEx, setSendLogCommand as _setSendLogCommand, saveToFile as _saveToFile, uploadMediaFile as _uploadMediaFile, registerServerCertVerifier} from "@wfc/marswrapper"
 import {pinyin4js} from '@ohos/pinyin4js';
 import fs from '@ohos.file.fs';
 
@@ -112,6 +112,51 @@ export function registerMessageFlag(type: number, flag: number) {
 
 export function useSM4() {
     clientModule.useSM4()
+}
+
+// 协议栈在 connect 时才创建 mars，在那之前设置都有效
+export function setUseWebsocket(useWebsocket: boolean) {
+    clientModule.setUseWebsocket(useWebsocket)
+}
+
+export function isUseWebsocket(): boolean {
+    return clientModule.isUseWebsocket() == 1
+}
+
+export function useTls(skipVerifyCert: boolean, certificates: string[]) {
+    // 服务端证书链校验器在 har 加载时会自动注册一次，但应用被应用池（apppool）预加载时，那次注册会随预加载运行时
+    // 一起销毁，所以紧挨着 useTls 再注册一次（可重复调用），同 hm-chat 的 WfcManager.UseTls
+    registerServerCertVerifier(clientModule)
+    clientModule.useTls(skipVerifyCert, certificatePaths(certificates))
+}
+
+// 协议栈也能直接吃 PEM 内容，但要先调 setAppDataPath 才能落盘，否则抛异常；这里统一自己落到 filesDir/certs 再传路径
+function certificatePaths(certificates: string[]): string[] {
+    let paths: string[] = []
+    const certDir = getContext().filesDir + '/certs'
+    for (let i = 0; i < certificates.length; i++) {
+        const cert = certificates[i]
+        if (cert == '') {
+            continue
+        }
+        if (!cert.includes('-----BEGIN CERTIFICATE-----')) {
+            paths.push(cert)
+            continue
+        }
+        try {
+            if (!fs.accessSync(certDir)) {
+                fs.mkdirSync(certDir)
+            }
+            const certPath = certDir + '/wfc_pinned_' + i + '.pem'
+            const certFile = fs.openSync(certPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC)
+            fs.writeSync(certFile.fd, cert)
+            fs.closeSync(certFile)
+            paths.push(certPath)
+        } catch (e) {
+            console.error('save pem certificate fail', e)
+        }
+    }
+    return paths
 }
 
 export function setSendLogCommand(command: string) {

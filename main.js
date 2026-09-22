@@ -119,6 +119,13 @@ wfc.init();
 if(Config.SEND_LOG_COMMAND) {
     wfc.setSendLogCommand(Config.SEND_LOG_COMMAND)
 }
+// IM 长连接协议（websocket / TLS），协议栈在 connect 时才初始化，要在 SplashPage / 登录页 connect 之前设置
+if (Config.IM_USE_WEBSOCKET) {
+    wfc.setUseWebsocket(true);
+}
+if (Config.IM_USE_TLS) {
+    wfc.useTls(Config.IM_TLS_SKIP_VERIFY_CERT, Config.IM_TRUST_CERTIFICATES);
+}
 console.log('proto init end')
 CustomMessageConfig.registerCustomMessages();
 // 如果不进行初始化，则无法弹出音视频通话界面，不能进行音视频通话。
