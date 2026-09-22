@@ -3,6 +3,7 @@ import MessageContentType from "./messageContentType.uts";
 import MessagePayload from './messagePayload.uts';
 import { utf8_to_b64, b64_to_utf8 } from '../util/base64.uts'
 import LinkMessageContent from "./linkMessageContent.uts";
+import { redirectMediaUrl } from '../../common/mediaUrlRedirector.uts'
 
 export class Article {
     articleId = '';
@@ -26,7 +27,8 @@ export class Article {
     static fromJson(obj: UTSJSONObject): Article {
         const a = new Article()
         a.articleId = obj.getString('id') ?? '';
-        a.cover = obj.getString('cover') ?? '';
+        // 封面一般在自己的媒体服务上，双网环境下要换成当前网络的前缀，对齐 flutter articles_cell_builder
+        a.cover = redirectMediaUrl(obj.getString('cover') ?? '');
         a.title = obj.getString('title') ?? '';
         a.digest = obj.getString('digest') ?? '';
         a.url = obj.getString('url') ?? '';

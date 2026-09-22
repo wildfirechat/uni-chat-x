@@ -137,6 +137,7 @@ export default class Config {
     static QR_CODE_PREFIX_PC_SESSION = "wildfirechat://pcsession/";
 
     // turn server 配置，音视频功能暂未迁移，保留配置
+    // 双网环境下把备网的 turn 也加进来（主备各一条），否则备网下音视频连不通
     static ICE_SERVERS: ICEServer[] = [new ICEServer('turn:turn.wildfirechat.net:3478', 'wfchat', 'wfchat123')];
     static LANGUAGE = 'zh_CN';
 
@@ -248,8 +249,11 @@ export default class Config {
      * `Config.MAIN_MEDIA_URL_PREFIX` / `BACKUP_MEDIA_URL_PREFIX`。
      *
      * 只在政企内外双网部署时配置，两个都配上才生效；不需要双网就保持空字符串。
+     * ⚠️ 配了 IM_SERVER_BACKUP_HOST 却漏配这两个，IM 能切网，但图片、文件、头像等地址不跟着切，
+     * 换到另一张网就加载不出来。单入口部署（媒体文件和其它服务一样经由主备地址的 443 对外）时，
+     * 直接填主备地址，如 'https://主网host' / 'https://备网host'，不带路径、末尾不带 /。
      * 实际的前缀互换在 [common/mediaUrlRedirector.uts](common/mediaUrlRedirector.uts)，
-     * 当前连的是主网还是备网由协议栈的 onConnectToServer 回调告知。
+     * 当前连的是主网还是备网见 [common/dualNetwork.uts](common/dualNetwork.uts)。
      */
     static MAIN_MEDIA_URL_PREFIX = '';
     static BACKUP_MEDIA_URL_PREFIX = '';

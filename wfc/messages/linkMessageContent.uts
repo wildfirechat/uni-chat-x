@@ -2,6 +2,7 @@ import MessageContent from "./messageContent.uts";
 import MessageContentType from "./messageContentType.uts";
 import MessagePayload from './messagePayload.uts';
 import { utf8_to_b64, b64_to_utf8 } from '../util/base64.uts'
+import { redirectMediaUrl } from '../../common/mediaUrlRedirector.uts'
 
 export default class LinkMessageContent extends MessageContent {
     title = '';
@@ -34,7 +35,8 @@ export default class LinkMessageContent extends MessageContent {
         if (obj != null) {
             this.contentDigest = obj.getString('d') ?? '';
             this.url = obj.getString('u') ?? '';
-            this.thumbnail = obj.getString('t') ?? '';
+            // 缩略图可能是自己服务上的图片，双网环境下要换成当前网络的前缀，对齐 flutter link_cell_builder
+            this.thumbnail = redirectMediaUrl(obj.getString('t') ?? '');
         }
     }
 

@@ -1,7 +1,7 @@
 import Config from "../config.uts";
 import AppServerError from "./appServerError.uts";
 import wfc from "../wfc/client/wfc.uts";
-import { getItem, setItem } from "../pages/util/storageHelper.uts";
+import { jsonHeaderWithAuthToken, saveAuthTokenFromHeader, AUTH_TOKEN_SERVICE_APP } from "./authToken.uts";
 import ConnectionStatus from "../wfc/client/connectionStatus.uts";
 import { getBackupAddressStrategy, BACKUP_ADDRESS_STRATEGY_AUTO } from "../common/dualNetwork.uts";
 
@@ -39,38 +39,6 @@ export const SLIDE_VERIFY_IMAGE_WIDTH: number = 300
 export const SLIDE_VERIFY_IMAGE_HEIGHT: number = 150
 /** 滑块原始边长（服务端画的是 50x50 正方形）。 */
 export const SLIDE_VERIFY_SLIDER_SIZE: number = 50
-
-/**
- * 从响应头里取 app server 的 authToken。
- *
- * 注意：鸿蒙端 res.header 只是个普通对象，并不是 UTSJSONObject 实例，调用 getString 会直接抛
- * “undefined is not callable”（Android/iOS 上则正常），所以这里一律用下标取值。
- * 另外各端返回的 header 名大小写不一致，逐个兼容。
- */
-function getAuthTokenFromHeader(header: UTSJSONObject | null): string | null {
-    if (header == null) {
-        return null
-    }
-    let value = header['authtoken']
-    if (value == null) {
-        value = header['authToken']
-    }
-    if (value == null) {
-        value = header['Authtoken']
-    }
-    if (value == null) {
-        value = header['AuthToken']
-    }
-    if (value == null) {
-        console.log('no authToken in response header', header)
-        return null
-    }
-    if (typeof value == 'string') {
-        return value as string
-    }
-    console.log('unexpected authToken type in response header', value)
-    return null
-}
 
 /**
  * 登录前等 IM 未连接时，探测到的可用应用服务地址，'' 表示还没有探测结果
@@ -218,8 +186,7 @@ export class AppServerApi {
     /**
      * 生成一张滑块验证码。对齐 flutter `AppServer.generateSlideVerifyCode`。
      *
-     * 注意这个接口**不需要登录态**（登录页本来就还没登录），`_post` 带上的空 authToken
-     * 服务端会忽略。
+     * 注意这个接口**不需要登录态**（登录页本来就还没登录），`_post` 没有 authToken 时不带。
      */
     generateSlideVerifyCode(): Promise<SlideVerifyData> {
         return new Promise<SlideVerifyData>((resolve, reject) => {
@@ -345,6 +312,7 @@ export class AppServerApi {
                     } as UTSJSONObject,
                     method: 'POST',
                     success: (res) => {
+                        saveAuthTokenFromHeader(AUTH_TOKEN_SERVICE_APP, res.header as UTSJSONObject | null)
                         if (res.statusCode == 200) {
                             const body = res.data
                             if (body == null) {
@@ -353,11 +321,6 @@ export class AppServerApi {
                             }
                             const code = body.getNumber('code') ?? -1
                             if (code == 0) {
-                                const header = res.header as UTSJSONObject | null
-                                const appAuthToken = getAuthTokenFromHeader(header)
-                                if (appAuthToken != null) {
-                                    setItem('authToken-app', appAuthToken);
-                                }
                                 const result = body.getJSON('result')
                                 const loginResult = new LoginResult()
                                 if (result != null) {
@@ -406,12 +369,10 @@ export class AppServerApi {
                 uni.request<UTSJSONObject>({
                     url: url,
                     data: data,
-                    header: {
-                        'content-type': 'application/json',
-                        'authToken': getItem('authToken-app'),
-                    } as UTSJSONObject,
+                    header: jsonHeaderWithAuthToken(AUTH_TOKEN_SERVICE_APP),
                     method: 'POST',
                     success: (res) => {
+                        saveAuthTokenFromHeader(AUTH_TOKEN_SERVICE_APP, res.header as UTSJSONObject | null)
                         if (res.statusCode == 200) {
                             const body = res.data
                             if (body == null) {

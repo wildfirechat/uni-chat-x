@@ -1,5 +1,5 @@
 import Config from "../config.uts";
-import { getItem, setItem } from "../pages/util/storageHelper.uts";
+import { jsonHeaderWithAuthToken, saveAuthTokenFromHeader, removeAuthToken, AUTH_TOKEN_SERVICE_ORG } from "./authToken.uts";
 import wfc from "../wfc/client/wfc.uts";
 import OrganizationServerError from "./organizationServerError.uts";
 import UserInfo from "../wfc/model/userInfo.uts";
@@ -11,8 +11,14 @@ import {
     employeeDefaultPortrait
 } from "./organizationModel.uts";
 
+/** 组织通讯录服务的「没有登录」，token 过期或服务重启后会返回它（HTTP 仍是 200） */
+const ERROR_NOT_LOGIN: number = 13
+
 export class OrganizationServerApi {
     isServiceAvailable = true;
+
+    /** 正在进行的重新登录，并发请求遇到「没有登录」时共用这一次 */
+    private reloginPromise: Promise<UTSJSONObject | null> | null = null;
 
     login(): Promise<UTSJSONObject | null> {
         return new Promise<UTSJSONObject | null>((resolve, reject) => {
@@ -31,18 +37,11 @@ export class OrganizationServerApi {
                     } as UTSJSONObject,
                     method: 'POST',
                     success: (res) => {
+                        saveAuthTokenFromHeader(AUTH_TOKEN_SERVICE_ORG, res.header as UTSJSONObject | null)
                         const body = res.data
                         if (res.statusCode == 200 && body != null) {
                             const resultCode = body.getNumber('code') ?? -1
                             if (resultCode == 0) {
-                                const header = res.header as UTSJSONObject | null
-                                let appAuthToken = header?.getString('authtoken')
-                                if (appAuthToken == null) {
-                                    appAuthToken = header?.getString('authToken')
-                                }
-                                if (appAuthToken != null) {
-                                    setItem('authToken-org', appAuthToken);
-                                }
                                 this.isServiceAvailable = true;
                                 resolve(body.getJSON('result'));
                             } else {
@@ -156,22 +155,68 @@ export class OrganizationServerApi {
     }
 
     /**
-     * 通用 post，resolve 的是 response.data.result（可能是对象或数组）
+     * 通用 post，resolve 的是 response.data.result（可能是对象或数组）。
+     *
+     * 本地存的 token 可能已在服务端失效（服务重启、会话过期），遇到「没有登录」时清掉旧 token
+     * 重新登录，再重试一次。对齐 flutter `OrganizationService._post`。
      */
     _post(path: string, data: UTSJSONObject): Promise<any | null> {
         return new Promise<any | null>((resolve, reject) => {
-            const url = Config.getOrganizationServer() + path;
+            this._postOnce(path, data).then((result: any | null): void => {
+                resolve(result)
+            }).catch((err: any | null): void => {
+                if (!(err instanceof OrganizationServerError) || (err as OrganizationServerError).errorCode != ERROR_NOT_LOGIN) {
+                    reject(err)
+                    return
+                }
+                this._relogin().then((_r: UTSJSONObject | null): void => {
+                    this._postOnce(path, data).then((result: any | null): void => {
+                        resolve(result)
+                    }).catch((retryErr: any | null): void => {
+                        reject(retryErr)
+                    })
+                }).catch((_loginErr: any | null): void => {
+                    reject(err)
+                })
+            })
+        });
+    }
+
+    /** 清除失效的 token 并重新登录，并发的请求共用同一次登录 */
+    private _relogin(): Promise<UTSJSONObject | null> {
+        const pending = this.reloginPromise
+        if (pending != null) {
+            return pending
+        }
+        removeAuthToken(AUTH_TOKEN_SERVICE_ORG)
+        const relogin = new Promise<UTSJSONObject | null>((resolve, reject) => {
+            this.login().then((result: UTSJSONObject | null): void => {
+                this.reloginPromise = null
+                resolve(result)
+            }).catch((err: any | null): void => {
+                this.reloginPromise = null
+                reject(err)
+            })
+        })
+        this.reloginPromise = relogin
+        return relogin
+    }
+
+    private _postOnce(path: string, data: UTSJSONObject): Promise<any | null> {
+        return new Promise<any | null>((resolve, reject) => {
+            const organizationServer = Config.getOrganizationServer()
             uni.request<UTSJSONObject>({
-                url: url,
+                url: organizationServer + path,
                 data: data,
-                header: {
-                    'content-type': 'application/json',
-                    'authToken': getItem('authToken-org'),
-                } as UTSJSONObject,
+                header: jsonHeaderWithAuthToken(AUTH_TOKEN_SERVICE_ORG),
                 method: 'POST',
                 success: (res) => {
+                    saveAuthTokenFromHeader(AUTH_TOKEN_SERVICE_ORG, res.header as UTSJSONObject | null)
                     const body = res.data
-                    if (res.statusCode == 200 && body != null) {
+                    if (res.statusCode == 401 || res.statusCode == 403) {
+                        // 服务本身不返回 401/403（没有登录是 HTTP 200 + code 13），对齐 flutter 也按「没有登录」处理
+                        reject(new OrganizationServerError(ERROR_NOT_LOGIN, 'request error, status code: ' + res.statusCode))
+                    } else if (res.statusCode == 200 && body != null) {
                         const code = body.getNumber('code') ?? -1
                         if (code == 0) {
                             resolve(body.get('result'));

@@ -1,0 +1,75 @@
+/**
+ * 业务服务（应用服务、组织通讯录服务）的 authToken。对齐 flutter `utils/auth_token_http.dart`。
+ *
+ * 服务在响应头 authToken 里下发 token（登录接口一定下发，其它接口也可能刷新），之后的请求在请求头里带上。
+ *
+ * token 按服务分开存，和服务地址无关：单入口部署下多个服务共用同一个 host，各自下发的 token
+ * 不会互相覆盖；双网环境下同一个服务的主备地址共用一个 token，切换网络后不用重新登录。
+ *
+ * 退出登录、注销账号时整个 storage 都清掉了（pages/util/storageHelper.uts 的 clear），这里不用单独清。
+ */
+import { getItem, setItem, removeItem } from '../pages/util/storageHelper.uts'
+
+export const AUTH_TOKEN_SERVICE_APP: string = 'app'
+export const AUTH_TOKEN_SERVICE_ORG: string = 'org'
+
+function storageKey(service: string): string {
+    return 'authToken-' + service
+}
+
+/**
+ * 从响应头里取 authToken，没有时返回 ''。
+ *
+ * 注意：鸿蒙端 res.header 只是个普通对象，并不是 UTSJSONObject 实例，调用 getString 会直接抛
+ * “undefined is not callable”（Android/iOS 上则正常），所以这里一律用下标取值。
+ * 另外各端返回的 header 名大小写不一致，逐个兼容。
+ */
+function getAuthTokenFromHeader(header: UTSJSONObject | null): string {
+    if (header == null) {
+        return ''
+    }
+    let value = header['authtoken']
+    if (value == null) {
+        value = header['authToken']
+    }
+    if (value == null) {
+        value = header['Authtoken']
+    }
+    if (value == null) {
+        value = header['AuthToken']
+    }
+    if (value == null) {
+        return ''
+    }
+    if (typeof value == 'string') {
+        return value as string
+    }
+    console.log('unexpected authToken type in response header', value)
+    return ''
+}
+
+/**
+ * 保存响应头里下发的 authToken。服务的每个响应都要过一遍，不只是登录接口，
+ * 服务端刷新 token 时也是从响应头下发的。
+ */
+export function saveAuthTokenFromHeader(service: string, header: UTSJSONObject | null): void {
+    const token = getAuthTokenFromHeader(header)
+    if (token != '') {
+        setItem(storageKey(service), token)
+    }
+}
+
+/** 清除 [service] 的 authToken，token 在服务端失效、重新登录前调用 */
+export function removeAuthToken(service: string): void {
+    removeItem(storageKey(service))
+}
+
+/** JSON 请求头，带上 [service] 的 authToken（有的话） */
+export function jsonHeaderWithAuthToken(service: string): UTSJSONObject {
+    const header = { 'content-type': 'application/json' } as UTSJSONObject
+    const token = getItem(storageKey(service))
+    if (token != '') {
+        header.set('authToken', token)
+    }
+    return header
+}
