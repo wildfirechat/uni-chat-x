@@ -123,6 +123,14 @@ export function isUseWebsocket(): boolean {
     return clientModule.isUseWebsocket() == 1
 }
 
+// @wfc/marswrapper（harmony-configs/libs/marswrapper.har）未封装 setHttpPrefixPath/setHttpUploadPrefixPath，
+// 暂时空实现，待 marswrapper.har 升级（hongmeng_sdk 的 NAPI 已导出）后透传给 clientModule
+export function setHttpPrefixPath(prefixPath: string) {
+}
+
+export function setHttpUploadPrefixPath(prefixPath: string) {
+}
+
 export function useTls(skipVerifyCert: boolean, certificates: string[]) {
     // 服务端证书链校验器在 har 加载时会自动注册一次，但应用被应用池（apppool）预加载时，那次注册会随预加载运行时
     // 一起销毁，所以紧挨着 useTls 再注册一次（可重复调用），同 hm-chat 的 WfcManager.UseTls
