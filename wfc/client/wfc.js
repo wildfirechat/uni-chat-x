@@ -100,6 +100,24 @@ export class WfcManager {
     }
 
     /**
+     * 设置协议栈短连接HTTP请求的prefix path
+     *
+     * @param {string} prefixPath HTTP请求的prefix path
+     */
+    setHttpPrefixPath(prefixPath) {
+        utsWfcClient.setHttpPrefixPath(prefixPath);
+    }
+
+    /**
+     * 设置协议栈上传文件的HTTP请求的prefix path
+     *
+     * @param {string} prefixPath 上传文件HTTP请求的prefix path
+     */
+    setHttpUploadPrefixPath(prefixPath) {
+        utsWfcClient.setHttpUploadPrefixPath(prefixPath);
+    }
+
+    /**
      * 开启 TLS（wss/https），需要专业版 IM 服务并开启 TLS 功能。必须在 connect 之前调用。
      *
      * @param {boolean} skipVerifyCert 是否跳过服务端证书校验，true 时只加密不校验，有中间人攻击风险

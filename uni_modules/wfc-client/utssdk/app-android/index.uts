@@ -91,6 +91,18 @@ export function isUseWebsocket(): boolean {
     return ProtoLogic.isUseWebsocket()
 }
 
+// 同 setUseWebsocket：native 库要等 ClientService.onCreate 才加载，
+// 先自己加载一次（System.loadLibrary 重复调用没有副作用），否则调 ProtoLogic 会 UnsatisfiedLinkError。
+export function setHttpPrefixPath(prefixPath: string) {
+    Mars.loadDefaultMarsLibrary()
+    ProtoLogic.setHttpPrefixPath(prefixPath)
+}
+
+export function setHttpUploadPrefixPath(prefixPath: string) {
+    Mars.loadDefaultMarsLibrary()
+    ProtoLogic.setHttpUploadPrefixPath(prefixPath)
+}
+
 export function useTls(skipVerifyCert: boolean, certificates: string[]) {
     Mars.loadDefaultMarsLibrary()
     ProtoLogic.useTls(skipVerifyCert, certificatePaths(certificates).toTypedArray())

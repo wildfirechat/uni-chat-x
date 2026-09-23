@@ -78,6 +78,16 @@ export function isUseWebsocket(): boolean {
     return WFCCNetworkService.sharedInstance()!.isUseWebsocket();
 }
 
+// WFClientModule 没有封装，直接调 WFCCNetworkService。
+// 协议栈在 connect 时才 createMars，在那之前设置都有效
+export function setHttpPrefixPath(prefixPath: string) {
+    WFCCNetworkService.sharedInstance()!.setHttpPrefixPath(prefixPath);
+}
+
+export function setHttpUploadPrefixPath(prefixPath: string) {
+    WFCCNetworkService.sharedInstance()!.setHttpUploadPrefixPath(prefixPath);
+}
+
 export function useTls(skipVerifyCert: boolean, certificates: string[]) {
     WFCCNetworkService.sharedInstance()!.useTls(skipVerifyCert, selfSignedCerts=certificatePaths(certificates));
 }

@@ -149,6 +149,8 @@ import {
 	setSendLogCommand,
     setUseWebsocket,
     isUseWebsocket,
+    setHttpPrefixPath,
+    setHttpUploadPrefixPath,
     useTls,
     getMessageByUid,
     getGroupMember,
@@ -318,6 +320,8 @@ class UtsWfcClient {
 	setSendLogCommand=setSendLogCommand
     setUseWebsocket = setUseWebsocket
     isUseWebsocket = isUseWebsocket
+    setHttpPrefixPath = setHttpPrefixPath
+    setHttpUploadPrefixPath = setHttpUploadPrefixPath
     useTls = useTls
     getMessageByUid = getMessageByUid
     getGroupMember = getGroupMember
