@@ -132,6 +132,10 @@ export default class Config {
     // 和鸿蒙（rawfile）上都不是真实文件路径，没法直接传给协议栈
     // static IM_TRUST_CERTIFICATES: string[] = [WILDFIRE_IM_CA];
 	static IM_TRUST_CERTIFICATES: string[] = [];
+    // 媒体服务器（野火专业存储/阿里云等 PUT 上传）用自签证书时，大文件上传信任的证书，写法同 IM_TRUST_CERTIFICATES，与之互不影响。
+    // 目前只有鸿蒙生效：鸿蒙系统上传服务不认应用内置证书，配置后改用 RCP 上传，且只信任这里的证书，所以公签证书的媒体服务不要配置
+    // static UPLOAD_SERVER_CERTIFICATES: string[] = [WILDFIRE_IM_CA];
+    static UPLOAD_SERVER_CERTIFICATES: string[] = [];
 	
 
     static QR_CODE_PREFIX_PC_SESSION = "wildfirechat://pcsession/";

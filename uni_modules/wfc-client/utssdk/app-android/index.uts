@@ -139,6 +139,10 @@ export function useTls(skipVerifyCert: boolean, certificates: string[]) {
     ProtoLogic.useTls(skipVerifyCert, certificatePaths(certificates).toTypedArray())
 }
 
+// 只有鸿蒙需要：Android 大文件上传由原生 SDK 完成
+export function setUploadServerCerts(certificates: string[]) {
+}
+
 // ProtoLogic.useTls 只接受证书文件路径：PEM 内容先写到 filesDir/certs 下再传路径，其余按文件路径原样传
 function certificatePaths(certificates: string[]): string[] {
     let paths: string[] = []
