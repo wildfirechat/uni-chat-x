@@ -128,6 +128,16 @@ export class WfcManager {
     }
 
     /**
+     * 设置大文件上传信任的自签证书，用于媒体服务器使用自签证书的场景，与 useTls 相互独立。目前只有鸿蒙生效。
+     * 鸿蒙系统上传服务不认应用内置的证书，设置后 PUT 上传改用 RCP，且只信任这些证书；公签证书不要设置。
+     *
+     * @param {string[]} certificates 元素既可以是 PEM 内容，也可以是证书文件路径
+     */
+    setUploadServerCerts(certificates) {
+        utsWfcClient.setUploadServerCerts(certificates);
+    }
+
+    /**
      * 连接服务器
      * @param {string} userId 用户id
      * @param {string} token 用户token，生成token时，所使用的clientId，一定要通过{@link getClientId}获取

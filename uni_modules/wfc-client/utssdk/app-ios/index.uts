@@ -92,6 +92,10 @@ export function useTls(skipVerifyCert: boolean, certificates: string[]) {
     WFCCNetworkService.sharedInstance()!.useTls(skipVerifyCert, selfSignedCerts=certificatePaths(certificates));
 }
 
+// 只有鸿蒙需要：iOS 大文件上传由原生 SDK 完成
+export function setUploadServerCerts(certificates: string[]) {
+}
+
 // UseTls 只接受证书文件路径：PEM 内容先写到临时目录再传路径，其余按文件路径原样传
 function certificatePaths(certificates: string[]): string[] {
     let paths: string[] = []

@@ -126,6 +126,9 @@ if (Config.IM_USE_WEBSOCKET) {
 if (Config.IM_USE_TLS) {
     wfc.useTls(Config.IM_TLS_SKIP_VERIFY_CERT, Config.IM_TRUST_CERTIFICATES);
 }
+if (Config.UPLOAD_SERVER_CERTIFICATES.length > 0) {
+    wfc.setUploadServerCerts(Config.UPLOAD_SERVER_CERTIFICATES);
+}
 console.log('proto init end')
 CustomMessageConfig.registerCustomMessages();
 // 如果不进行初始化，则无法弹出音视频通话界面，不能进行音视频通话。

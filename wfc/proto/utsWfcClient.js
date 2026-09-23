@@ -152,6 +152,7 @@ import {
     setHttpPrefixPath,
     setHttpUploadPrefixPath,
     useTls,
+    setUploadServerCerts,
     getMessageByUid,
     getGroupMember,
     addMembers,
@@ -323,6 +324,7 @@ class UtsWfcClient {
     setHttpPrefixPath = setHttpPrefixPath
     setHttpUploadPrefixPath = setHttpUploadPrefixPath
     useTls = useTls
+    setUploadServerCerts = setUploadServerCerts
     getMessageByUid = getMessageByUid
     getGroupMember = getGroupMember
     addMembers = addMembers
