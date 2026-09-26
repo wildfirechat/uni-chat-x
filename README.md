@@ -34,6 +34,22 @@
 ## Android 端特别说明
 1. 由于 HBuilderX 的原因，制作自定义调试基座和云打包时，配置和本地运行无法统一，需要根据当前情况进行切换，具体请参考`uni_modules/wfc-av-client/utssdk/app-android/README.md`
 
+## 更新鸿蒙 SDK（marswrapper.har）
+
+鸿蒙端原生 SDK 通过`harmony-configs/oh-package.json5`中的本地文件依赖引入：`"@wfc/marswrapper": "file:./libs/marswrapper.har"`。
+
+**重要提醒：只替换 har 文件不会生效。** 该依赖是`file:`本地依赖，且 har 内版本号固定为`1.0.0`，ohpm 安装时会把它解到`oh_modules/.ohpm`缓存中，仅替换文件不会触发重新安装，编译出来的应用仍是旧库。
+
+更新步骤：
+
+1. 用新版`marswrapper.har`覆盖`harmony-configs/libs/marswrapper.har`
+2. HBuilderX 重新生成/同步鸿蒙工程后，到**生成的鸿蒙工程目录**下删除 ohpm 缓存并重装依赖：
+    ```bash
+    rm -rf oh_modules/.ohpm entry/oh_modules
+    ohpm install
+    ```
+    使用 DevEco Studio 时对应操作：删除上述目录后，执行 File -> Sync and Refresh Project
+3. 验证更新是否生效，确认生成的鸿蒙工程下`oh_modules/@wfc/marswrapper/libs/arm64-v8a/`里的`.so`文件日期/大小已变为新版
 
 ## 配置
 
