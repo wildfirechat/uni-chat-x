@@ -1,0 +1,79 @@
+<template>
+    <view class="page-root">
+        <web-view v-if="url != ''" id="pan-doc-webview" class="webview" :src="url" @message="onPostMessage"
+            @loaded="onLoaded"></web-view>
+        <!-- web-view 自己不能有子节点，水印只好包一层 view 挂在它旁边 -->
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 在线文档 H5 的宿主页。参考 `pages/workspace/WorkspaceWebViewPage.uvue`。
+ *
+ * 认证码放进页面 URL 的 fragment（`#panAuthCode=...`）：fragment 不发给服务端、不进日志，
+ * 页面读完立即抹掉（见 docs/doc-web-bridge.md）。桥用 postMessage 协议，见 panDocBridge.uts。
+ */
+import wfc from "@/wfc/client/wfc.uts";
+import Config from "@/config.uts";
+import { extractHost } from "@/api/authCodeApiClient.uts";
+import { redirectMediaUrl } from "@/common/mediaUrlRedirector.uts";
+import { PanDocBridge } from "./panDocBridge.uts";
+import { webViewMessageObjs } from "@/pages/workspace/webViewMessage.uts";
+
+const url = ref<string>('')
+const baseUrl = ref<string>('')
+const bridge = new PanDocBridge()
+
+onLoad((options: OnLoadOptions) => {
+    const target = redirectMediaUrl(decodeURIComponent(options['url'] ?? ''))
+    baseUrl.value = target
+    const name = decodeURIComponent(options['name'] ?? '')
+    if (name != '') {
+        uni.setNavigationBarTitle({ title: name } as SetNavigationBarTitleOptions)
+    }
+    if (target == '') {
+        return
+    }
+    if (!Config.isPanEnabled()) {
+        url.value = target
+        return
+    }
+    // 取一次性认证码再加载页面；取不到就原样加载（页面会给「不在客户端内」的提示）
+    wfc.getAuthCode('admin', 2, extractHost(target), (authCode: string) => {
+        const separator = target.indexOf('#') >= 0 ? '&' : '#'
+        url.value = target + separator + 'panAuthCode=' + encodeURIComponent(authCode)
+    }, (err: number) => {
+        console.log('pan doc getAuthCode fail', err)
+        url.value = target
+    })
+})
+
+onReady(() => {
+    // 蒸汽模式下仅支持 V 大写，见 WorkspaceWebViewPage 的说明
+    const webviewContext = uni.createWebViewContext('pan-doc-webview', getCurrentInstance()!.proxy!)
+    bridge.init(webviewContext, baseUrl.value)
+})
+
+const onPostMessage = (event: UniWebViewMessageEvent) => {
+    webViewMessageObjs(event).forEach((obj: string) => {
+        bridge.messageFromWebView(obj)
+    })
+}
+
+const onLoaded = (_event: UniWebViewLoadEvent) => {
+    // uni-app x 暂无 receivedtitle 事件，标题用参数里的文件名
+}
+</script>
+
+<style scoped>
+.page-root {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.webview {
+    flex: 1;
+}
+</style>

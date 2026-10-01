@@ -1,0 +1,507 @@
+/**
+ * 网盘服务客户端。对齐 flutter `chat/lib/pan/pan_service.dart`。
+ *
+ * 对接独立部署的 wf-pan-server：接口在 `{PAN_SERVER}/api/v1/**`（`Config.getPanServer()`
+ * 已含 `/api/v1`），鉴权走 authCode（appId `admin`、type 2），见 [AuthCodeApiClient]。
+ * 服务端响应包装字段是 `data`（`dto/Result.java`），这里同时兼容老版的 `result`。
+ *
+ * 方法签名用「多个位置参数 + 默认值」而不是 flutter 的具名参数 —— uts 没有具名参数。
+ */
+import Config from "../config.uts";
+import wfc from "../wfc/client/wfc.uts";
+import { AuthCodeApiClient, AuthCodeApiError } from "./authCodeApiClient.uts";
+import {
+    PanSpace,
+    PanSpaceType,
+    PanFile,
+    PanDocEntry,
+    PanShare,
+    PanFileVersion,
+    PanException,
+    panSpaceFromJson,
+    panFileFromJson,
+    panShareFromJson,
+    panFileVersionFromJson,
+    panRecentDocFromJson,
+    panSharedDocFromJson,
+    jsonObjectList
+} from "./panModel.uts";
+
+export class PanServerApi {
+    private client = new AuthCodeApiClient('admin', 2, (): string => Config.getPanServer())
+
+    /** 网盘服务是否配置。没配时所有网盘入口都不显示。 */
+    isAvailable(): boolean {
+        return this.client.isAvailable()
+    }
+
+    // ---- 空间 ----
+
+    /** 获取所有可访问的空间列表。`POST /spaces/list` */
+    getSpaces(): Promise<PanSpace[]> {
+        return new Promise<PanSpace[]>((resolve, reject) => {
+            this._list('/spaces/list', {} as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    resolve(this._spacesFromJson(jsons))
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /**
+     * 网盘首页列出的空间：全局公共空间 + 自己的两个（别人的公共空间不列），
+     * 个人空间排最前。`POST /spaces/list`
+     */
+    getVisibleSpaces(): Promise<PanSpace[]> {
+        return new Promise<PanSpace[]>((resolve, reject) => {
+            this.getSpaces()
+                .then((spaces: PanSpace[]): void => {
+                    const mine = spaces.filter((s: PanSpace): boolean => {
+                        return s.spaceType == PanSpaceType.globalPublic || s.ownerId == wfc.getUserId()
+                    })
+                    // 对齐 flutter 的 order: 个人私有 -> 我的公共 -> 全局公共
+                    const order = [PanSpaceType.userPrivate, PanSpaceType.userPublic, PanSpaceType.globalPublic]
+                    const result: PanSpace[] = []
+                    for (let i = 0; i < order.length; i++) {
+                        for (let j = 0; j < mine.length; j++) {
+                            if (mine[j].spaceType == order[i]) {
+                                result.push(mine[j])
+                            }
+                        }
+                    }
+                    resolve(result)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 获取我的空间（公共 + 私有）。`POST /spaces/my` */
+    getMySpaces(): Promise<PanSpace[]> {
+        return new Promise<PanSpace[]>((resolve, reject) => {
+            this._list('/spaces/my', {} as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    resolve(this._spacesFromJson(jsons))
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 获取指定用户的公共空间。`POST /spaces/user/public` */
+    getUserPublicSpace(userId: string): Promise<PanSpace | null> {
+        return new Promise<PanSpace | null>((resolve, reject) => {
+            this._object('/spaces/user/public', { targetUserId: userId } as UTSJSONObject)
+                .then((json: UTSJSONObject | null): void => {
+                    resolve(json != null ? panSpaceFromJson(json!) : null)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    // ---- 文件 ----
+
+    /** 获取空间内文件列表。`POST /spaces/files` */
+    getSpaceFiles(spaceId: number, parentId: number = 0): Promise<PanFile[]> {
+        return new Promise<PanFile[]>((resolve, reject) => {
+            this._list('/spaces/files', { spaceId: spaceId, parentId: parentId } as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    const files: PanFile[] = []
+                    for (let i = 0; i < jsons.length; i++) {
+                        files.push(panFileFromJson(jsons[i]))
+                    }
+                    resolve(files)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 创建文件夹。`POST /files/folder` */
+    createFolder(spaceId: number, name: string, parentId: number = 0): Promise<PanFile> {
+        const params = { spaceId: spaceId, name: name } as UTSJSONObject
+        if (parentId > 0) {
+            params['parentId'] = parentId
+        }
+        return this._file('/files/folder', params)
+    }
+
+    /**
+     * 创建文件记录（上传完成后调用）。`POST /files`
+     * [copy] true 时让服务端把物理文件拷进网盘 bucket（用于从文件消息保存）。
+     */
+    createFile(spaceId: number, name: string, size: number, storageUrl: string,
+        parentId: number = 0, mimeType: string = '', md5: string = '', copy: boolean = false): Promise<PanFile> {
+        const params = {
+            spaceId: spaceId,
+            name: name,
+            size: size,
+            storageUrl: storageUrl,
+            copy: copy
+        } as UTSJSONObject
+        if (parentId > 0) {
+            params['parentId'] = parentId
+        }
+        if (mimeType != '') {
+            params['mimeType'] = mimeType
+        }
+        if (md5 != '') {
+            params['md5'] = md5
+        }
+        return this._file('/files', params)
+    }
+
+    /**
+     * 把一个存储地址（消息里的文件）保存进「我的网盘」。
+     * 目标固定是个人空间的根目录；重名自动加 (1)/(2)。
+     */
+    saveFileToMyPan(name: string, size: number, storageUrl: string,
+        mimeType: string = '', md5: string = ''): Promise<PanFile> {
+        return new Promise<PanFile>((resolve, reject) => {
+            this.getMySpaces()
+                .then((spaces: PanSpace[]): void => {
+                    if (spaces.length == 0) {
+                        reject(new PanException(-1, '没有可用的网盘空间'))
+                        return
+                    }
+                    let space = spaces[0]
+                    for (let i = 0; i < spaces.length; i++) {
+                        if (spaces[i].spaceType == PanSpaceType.userPrivate) {
+                            space = spaces[i]
+                            break
+                        }
+                    }
+                    const targetSpace = space
+                    this.getSpaceFiles(targetSpace.spaceId, 0)
+                        .then((existing: PanFile[]): void => {
+                            this.createFile(targetSpace.spaceId, this.uniqueFileName(existing, name),
+                                size, storageUrl, 0, mimeType, md5, true)
+                                .then((file: PanFile): void => {
+                                    resolve(file)
+                                })
+                                .catch((err: any | null): void => {
+                                    reject(this._wrap(err))
+                                })
+                        })
+                        .catch((err: any | null): void => {
+                            reject(this._wrap(err))
+                        })
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 删除文件/文件夹。`POST /files/delete` */
+    deleteFile(fileId: number): Promise<UTSJSONObject | null> {
+        return this._post('/files/delete', { fileId: fileId } as UTSJSONObject)
+    }
+
+    /** 重命名文件/文件夹。`POST /files/rename` */
+    renameFile(fileId: number, newName: string): Promise<UTSJSONObject | null> {
+        return this._post('/files/rename', { fileId: fileId, newName: newName } as UTSJSONObject)
+    }
+
+    /** 移动文件/文件夹。`POST /files/move` */
+    moveFile(fileId: number, targetSpaceId: number, targetParentId: number = 0): Promise<UTSJSONObject | null> {
+        return this._post('/files/move', {
+            fileId: fileId,
+            targetSpaceId: targetSpaceId,
+            targetParentId: targetParentId
+        } as UTSJSONObject)
+    }
+
+    /** 复制文件/文件夹。`POST /files/copy` */
+    copyFile(fileId: number, targetSpaceId: number, targetParentId: number = 0): Promise<UTSJSONObject | null> {
+        return this._post('/files/copy', {
+            fileId: fileId,
+            targetSpaceId: targetSpaceId,
+            targetParentId: targetParentId
+        } as UTSJSONObject)
+    }
+
+    /** 获取文件下载/预览的签名地址。`POST /files/url` */
+    getFileDownloadUrl(fileId: number): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
+            this._object('/files/url', { fileId: fileId } as UTSJSONObject)
+                .then((json: UTSJSONObject | null): void => {
+                    resolve(json != null ? (json!.getString('storageUrl') ?? '') : '')
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 检查空间写入权限。`POST /files/check-permission` */
+    checkSpaceWritePermission(spaceId: number): Promise<boolean> {
+        return new Promise<boolean>((resolve, reject) => {
+            this._raw('/files/check-permission', { spaceId: spaceId } as UTSJSONObject)
+                .then((value: any | null): void => {
+                    resolve(value == true)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    // ---- 分享 ----
+
+    /** 文件的分享列表。`POST /shares/list` */
+    getShares(fileId: number): Promise<PanShare[]> {
+        return new Promise<PanShare[]>((resolve, reject) => {
+            this._list('/shares/list', { fileId: fileId } as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    const shares: PanShare[] = []
+                    for (let i = 0; i < jsons.length; i++) {
+                        shares.push(panShareFromJson(jsons[i]))
+                    }
+                    resolve(shares)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 分享给人或群；同一对象再分享一次就是改权限（服务端覆盖写）。`POST /shares/add` */
+    setShare(fileId: number, isGroup: boolean, targetId: string, canEdit: boolean): Promise<UTSJSONObject | null> {
+        return this._post('/shares/add', {
+            fileId: fileId,
+            targetType: isGroup ? 'GROUP' : 'USER',
+            targetId: targetId,
+            permission: canEdit ? 'EDIT' : 'VIEW'
+        } as UTSJSONObject)
+    }
+
+    /** `POST /shares/remove` */
+    removeShare(shareId: number): Promise<UTSJSONObject | null> {
+        return this._post('/shares/remove', { shareId: shareId } as UTSJSONObject)
+    }
+
+    // ---- 版本 ----
+
+    /** 文件的历史版本。`POST /versions/list` */
+    getVersions(fileId: number): Promise<PanFileVersion[]> {
+        return new Promise<PanFileVersion[]>((resolve, reject) => {
+            this._list('/versions/list', { fileId: fileId } as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    const versions: PanFileVersion[] = []
+                    for (let i = 0; i < jsons.length; i++) {
+                        versions.push(panFileVersionFromJson(jsons[i]))
+                    }
+                    resolve(versions)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 恢复到某个历史版本。`POST /versions/restore` */
+    restoreVersion(fileId: number, versionNo: number): Promise<UTSJSONObject | null> {
+        return this._post('/versions/restore', {
+            fileId: fileId,
+            versionNo: versionNo
+        } as UTSJSONObject)
+    }
+
+    // ---- 在线文档 ----
+
+    /** 最近打开的文档。`POST /docs/recent` */
+    getRecentDocs(): Promise<PanDocEntry[]> {
+        return new Promise<PanDocEntry[]>((resolve, reject) => {
+            this._list('/docs/recent', {} as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    const entries: PanDocEntry[] = []
+                    for (let i = 0; i < jsons.length; i++) {
+                        entries.push(panRecentDocFromJson(jsons[i]))
+                    }
+                    resolve(entries)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 共享给我的文件。`POST /shares/with-me` */
+    getSharedWithMe(): Promise<PanDocEntry[]> {
+        return new Promise<PanDocEntry[]>((resolve, reject) => {
+            this._list('/shares/with-me', {} as UTSJSONObject)
+                .then((jsons: UTSJSONObject[]): void => {
+                    const entries: PanDocEntry[] = []
+                    for (let i = 0; i < jsons.length; i++) {
+                        entries.push(panSharedDocFromJson(jsons[i]))
+                    }
+                    resolve(entries)
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    /** 从自己的最近打开里移除，文件不动。`POST /docs/recent/remove` */
+    removeRecentDoc(fileId: number): Promise<UTSJSONObject | null> {
+        return this._post('/docs/recent/remove', { fileId: fileId } as UTSJSONObject)
+    }
+
+    /** 用空白模板新建文档。`POST /docs/create` */
+    createDoc(type: string, name: string = ''): Promise<PanFile> {
+        const params = { type: type } as UTSJSONObject
+        if (name != '') {
+            params['name'] = name
+        }
+        return this._file('/docs/create', params)
+    }
+
+    /** 手机上能不能编辑（部署的 docs.mobile_edit）。`POST /docs/options` */
+    isMobileDocEditEnabled(): Promise<boolean> {
+        return new Promise<boolean>((resolve, reject) => {
+            this._object('/docs/options', {} as UTSJSONObject)
+                .then((json: UTSJSONObject | null): void => {
+                    resolve(json != null && (json!.getBoolean('mobileEdit') ?? false))
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    // ---- 内部 ----
+
+    private _post(path: string, params: UTSJSONObject): Promise<UTSJSONObject | null> {
+        return this.client.post(path, params)
+    }
+
+    /** 取 `data`（服务端独立部署）或 `result`（老版合并服务）。 */
+    private _value(body: UTSJSONObject | null): any | null {
+        if (body == null) {
+            return null
+        }
+        const data = body['data']
+        if (data != null) {
+            return data
+        }
+        return body['result']
+    }
+
+    private _list(path: string, params: UTSJSONObject): Promise<UTSJSONObject[]> {
+        return new Promise<UTSJSONObject[]>((resolve, reject) => {
+            this._post(path, params)
+                .then((body: UTSJSONObject | null): void => {
+                    resolve(jsonObjectList(this._value(body)))
+                })
+                .catch((err: any | null): void => {
+                    reject(err)
+                })
+        })
+    }
+
+    private _object(path: string, params: UTSJSONObject): Promise<UTSJSONObject | null> {
+        return new Promise<UTSJSONObject | null>((resolve, reject) => {
+            this._post(path, params)
+                .then((body: UTSJSONObject | null): void => {
+                    const data = this._value(body)
+                    resolve(data instanceof UTSJSONObject ? data as UTSJSONObject : null)
+                })
+                .catch((err: any | null): void => {
+                    reject(err)
+                })
+        })
+    }
+
+    /** 只关心 `data` 本身的场合（bool / 字符串等标量）。 */
+    private _raw(path: string, params: UTSJSONObject): Promise<any | null> {
+        return new Promise<any | null>((resolve, reject) => {
+            this._post(path, params)
+                .then((body: UTSJSONObject | null): void => {
+                    resolve(this._value(body))
+                })
+                .catch((err: any | null): void => {
+                    reject(err)
+                })
+        })
+    }
+
+    private _file(path: string, params: UTSJSONObject): Promise<PanFile> {
+        return new Promise<PanFile>((resolve, reject) => {
+            this._object(path, params)
+                .then((json: UTSJSONObject | null): void => {
+                    if (json == null) {
+                        reject(new PanException(-1, '返回数据为空'))
+                        return
+                    }
+                    resolve(panFileFromJson(json!))
+                })
+                .catch((err: any | null): void => {
+                    reject(this._wrap(err))
+                })
+        })
+    }
+
+    private _spacesFromJson(jsons: UTSJSONObject[]): PanSpace[] {
+        const spaces: PanSpace[] = []
+        for (let i = 0; i < jsons.length; i++) {
+            spaces.push(panSpaceFromJson(jsons[i]))
+        }
+        return spaces
+    }
+
+    private _wrap(err: any | null): PanException {
+        if (err instanceof PanException) {
+            return err as PanException
+        }
+        if (err instanceof AuthCodeApiError) {
+            const e = err as AuthCodeApiError
+            return new PanException(e.errorCode, e.message)
+        }
+        return new PanException(-1, '未知错误')
+    }
+
+    /** 重名时按 `base(1).ext` 规则取唯一名（对齐 flutter `_uniqueFileName`）。 */
+    uniqueFileName(existing: PanFile[], originalName: string): string {
+        let exists = false
+        for (let i = 0; i < existing.length; i++) {
+            if (existing[i].name == originalName) {
+                exists = true
+                break
+            }
+        }
+        if (!exists) {
+            return originalName
+        }
+        const extIndex = originalName.lastIndexOf('.')
+        const base = extIndex > 0 ? originalName.substring(0, extIndex) : originalName
+        const ext = extIndex > 0 ? originalName.substring(extIndex) : ''
+        let index = 1
+        while (true) {
+            const candidate = base + '(' + index + ')' + ext
+            let taken = false
+            for (let i = 0; i < existing.length; i++) {
+                if (existing[i].name == candidate) {
+                    taken = true
+                    break
+                }
+            }
+            if (!taken) {
+                return candidate
+            }
+            index++
+        }
+    }
+}
+
+/** 用静态常量而不是 enum（uts 的 enum 三端行为不一致，见 panModel.uts）。 */
+const panServerApi = new PanServerApi();
+export default panServerApi;

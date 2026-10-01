@@ -1,0 +1,257 @@
+<template>
+    <scroll-view class="page" direction="vertical" :style="{ backgroundColor: c.primaryBackground }">
+        <!-- 空间列表 -->
+        <view class="section-title" :style="{ color: c.textSecondary, fontSize: fontPx(FONT_XS) }">
+            {{ t('pan.space_section') }}
+        </view>
+        <view class="card" :style="{ backgroundColor: c.surface }">
+            <view v-for="space in spaces" :key="space.spaceId" class="row"
+                :hover-class="pressedClass" hover-stay-time="80" @tap="openSpace(space)"
+                :style="{ borderBottomColor: c.hairlineSoft }">
+                <view class="space-icon" :style="{ width: iconPx(44), height: iconPx(44), backgroundColor: c.accentSoft }">
+                    <text class="icomoon" :style="{ fontSize: iconPx(24), color: panSpaceIconColor(space) }">{{ panSpaceIcon(space) }}</text>
+                </view>
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ panSpaceDisplayName(space) }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ spaceSubtitle(space) }}</text>
+                </view>
+                <text class="arrow icomoon" :style="{ color: c.textTertiary, fontSize: iconPx(16) }">&#xf125;</text>
+            </view>
+        </view>
+
+        <!-- 共享给我 -->
+        <view class="section-title" :style="{ color: c.textSecondary, fontSize: fontPx(FONT_XS) }">
+            {{ t('pan.shared_with_me') }}
+        </view>
+        <view class="card" :style="{ backgroundColor: c.surface }">
+            <view v-if="shared.length == 0" class="empty-row">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.shared_empty') }}</text>
+            </view>
+            <view v-for="entry in shared" :key="entry.file.fileId" class="row"
+                :hover-class="pressedClass" hover-stay-time="80" @tap="openEntry(entry)"
+                :style="{ borderBottomColor: c.hairlineSoft }">
+                <image class="file-icon" :src="panFileIcon(entry.file)" mode="aspectFill" />
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ entry.file.name }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ sourceText(entry) }}</text>
+                </view>
+                <text class="arrow icomoon" :style="{ color: c.textTertiary, fontSize: iconPx(16) }">&#xf125;</text>
+            </view>
+        </view>
+
+        <!-- 加载 / 错误 / 空态 -->
+        <view v-if="loading" class="status">
+            <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+        </view>
+        <view v-else-if="failed" class="status" @tap="load">
+            <text :style="{ color: c.textSecondary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.load_failed') }}</text>
+            <text :style="{ color: c.accent, fontSize: fontPx(FONT_BASE) }">{{ t('pan.retry') }}</text>
+        </view>
+        <view v-else-if="spaces.length == 0" class="status">
+            <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.no_spaces') }}</text>
+        </view>
+
+        <watermark-overlay />
+    </scroll-view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 网盘首页（移动端）：空间列表 + 共享给我。对齐 flutter `pan/pan_home_screen.dart`
+ * 的移动分支（PC 那套左右分栏不搬）。点空间进文件列表页；点共享给我的文件进在线文档页。
+ */
+import Config from "@/config.uts";
+import panServerApi from "@/api/panServerApi.uts";
+import { PanSpace, PanDocEntry } from "@/api/panModel.uts";
+import { docOpenUrl } from "@/api/panDocUrl.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, iconPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+import { panSpaceDisplayName, panSpaceIcon, panSpaceIconColor, panFileIcon, panTimeText } from "./panUi.uts";
+
+defineOptions({
+    name: "PanHomePage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const spaces = ref<PanSpace[]>([] as PanSpace[])
+const shared = ref<PanDocEntry[]>([] as PanDocEntry[])
+const loading = ref<boolean>(true)
+const failed = ref<boolean>(false)
+
+const load = () => {
+    if (!Config.isPanEnabled()) {
+        loading.value = false
+        failed.value = true
+        return
+    }
+    loading.value = true
+    failed.value = false
+    panServerApi.getVisibleSpaces()
+        .then((list: PanSpace[]): void => {
+            spaces.value = list
+            loadShared()
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+            failed.value = true
+        })
+}
+
+const loadShared = () => {
+    panServerApi.getSharedWithMe()
+        .then((list: PanDocEntry[]): void => {
+            shared.value = list
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            // 共享列表拉失败不影响空间列表已经拿到的那部分
+            loading.value = false
+        })
+}
+
+onShow(() => {
+    load()
+})
+
+const spaceSubtitle = (space: PanSpace): string => {
+    return t1Local('pan.item_count', '' + space.fileCount) + '  ·  ' + formatQuota(space)
+}
+
+const formatQuota = (space: PanSpace): string => {
+    if (space.totalQuota <= 0) {
+        return ''
+    }
+    const used = (space.usedQuota / 1048576).toFixed(1)
+    const total = (space.totalQuota / 1048576).toFixed(1)
+    return used + ' MB / ' + total + ' MB'
+}
+
+const sourceText = (entry: PanDocEntry): string => {
+    if (entry.sources.length == 0) {
+        return panTimeText(entry.time)
+    }
+    const source = entry.sources[0]
+    if (source.isGroup) {
+        return t('pan.shared_by') + ' ' + source.sharerName + '  ·  ' + source.groupName
+    }
+    return t('pan.shared_by') + ' ' + source.sharerName
+}
+
+const openSpace = (space: PanSpace) => {
+    const url = '/pages/pan/PanFileListPage?spaceId=' + space.spaceId
+        + '&spaceName=' + encodeURIComponent(panSpaceDisplayName(space))
+        + '&spaceType=' + space.spaceType
+        + '&ownerId=' + encodeURIComponent(space.ownerId)
+        + '&canWrite=' + (space.canWrite() ? '1' : '0')
+        + '&folderId=0&folderName='
+    uni.navigateTo({ url: url, fail: (err) => { console.log('nav to PanFileListPage err', err) } } as NavigateToOptions)
+}
+
+const openEntry = (entry: PanDocEntry) => {
+    const url = docOpenUrl(entry.file.fileId)
+    if (url == '') {
+        return
+    }
+    uni.navigateTo({
+        url: '/pages/pan/PanDocWebViewPage?url=' + encodeURIComponent(url),
+        fail: (err) => { console.log('nav to PanDocWebViewPage err', err) }
+    } as NavigateToOptions)
+}
+
+function t1Local(key: string, arg0: string): string {
+    return t(key).replace('{0}', arg0)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+}
+
+.section-title {
+    padding: 14px 16px 6px 16px;
+}
+
+.card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px 10px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.space-icon {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.file-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.row-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin-left: 12px;
+    overflow: hidden;
+}
+
+.row-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.row-sub {
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.arrow {
+    flex-shrink: 0;
+    margin-left: 6px;
+}
+
+.empty-row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 0;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 0;
+}
+</style>

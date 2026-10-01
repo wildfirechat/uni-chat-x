@@ -1,0 +1,267 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.primaryBackground }">
+        <view class="toolbar" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+            <text class="toolbar-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ t('pan.share_with') }}</text>
+            <view class="add" :hover-class="pressedClass" hover-stay-time="80" @tap="showAddMenu">
+                <text class="icomoon" :style="{ color: c.accent, fontSize: iconPx(22) }">&#xf218;</text>
+            </view>
+        </view>
+
+        <scroll-view class="list" direction="vertical">
+            <view v-for="share in shares" :key="share.id" class="row"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <text class="icomoon row-icon" :style="{ color: c.textSecondary, fontSize: iconPx(22) }">{{ shareIcon(share) }}</text>
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ shareName(share) }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ share.canEdit ? t('pan.can_edit') : t('pan.can_view') }}</text>
+                </view>
+                <text class="icomoon remove" :style="{ color: c.danger, fontSize: iconPx(20) }"
+                    @tap="remove(share)">&#xf252;</text>
+            </view>
+
+            <view v-if="loading" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+            </view>
+            <view v-else-if="shares.length == 0" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.share_empty') }}</text>
+            </view>
+        </scroll-view>
+
+        <bottom-action-sheet v-model="addSheetVisible" :items="addItems" @select="onAddSelect" />
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 文件分享管理：改权限、分享给人 / 群、移除。对齐 flutter `pan/pan_share.dart` 的
+ * 分享列表部分（发在线文档链接卡片的消息构造不在这里，见计划的 M7 说明）。
+ */
+import panServerApi from "@/api/panServerApi.uts";
+import { PanShare, panErrorText } from "@/api/panModel.uts";
+import UserInfo from "@/wfc/model/userInfo.uts";
+import GroupInfo from "@/wfc/model/groupInfo.uts";
+import { pickUsers, PickUsersOptions, pickGroups, PickGroupsOptions } from "@/common/picker.uts";
+import { ActionSheetItem } from "@/components/bottom-action-sheet/actionSheetItem.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, iconPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+
+defineOptions({
+    name: "PanSharePage"
+})
+
+/** 待授权的分享对象 */
+class ShareTarget {
+    id = ''
+    isGroup = false
+}
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const fileId = ref<number>(0)
+const shares = ref<PanShare[]>([] as PanShare[])
+const loading = ref<boolean>(true)
+
+const addSheetVisible = ref<boolean>(false)
+const addItems = ref<ActionSheetItem[]>([
+    new ActionSheetItem(t('pan.choose_contact'), 'user'),
+    new ActionSheetItem(t('pan.choose_group'), 'group')
+] as ActionSheetItem[])
+
+onLoad((options: OnLoadOptions) => {
+    fileId.value = parseInt(options['fileId'] ?? '0')
+    const name = decodeURIComponent(options['fileName'] ?? '')
+    if (name != '') {
+        uni.setNavigationBarTitle({ title: name } as SetNavigationBarTitleOptions)
+    }
+})
+
+onShow(() => {
+    load()
+})
+
+const load = () => {
+    loading.value = shares.value.length == 0
+    panServerApi.getShares(fileId.value)
+        .then((list: PanShare[]): void => {
+            shares.value = list
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+        })
+}
+
+const shareName = (share: PanShare): string => {
+    return share.targetName != '' ? share.targetName : share.targetId
+}
+
+const shareIcon = (share: PanShare): string => {
+    return share.isGroup ? '\uf39e' : '\uf3a0'
+}
+
+const showAddMenu = () => {
+    addSheetVisible.value = true
+}
+
+const onAddSelect = (tag: string) => {
+    if (tag == 'group') {
+        const groupOptions = new PickGroupsOptions()
+        groupOptions.successCB = (groups: GroupInfo[]) => {
+            if (groups.length == 0) {
+                return
+            }
+            const targets: ShareTarget[] = []
+            for (let i = 0; i < groups.length; i++) {
+                const target = new ShareTarget()
+                target.id = groups[i].target
+                target.isGroup = true
+                targets.push(target)
+            }
+            addTargets(targets, 0)
+        }
+        pickGroups(groupOptions)
+        return
+    }
+    const userOptions = new PickUsersOptions()
+    userOptions.confirmTitle = '确定'
+    userOptions.successCB = (users: UserInfo[]) => {
+        if (users.length == 0) {
+            return
+        }
+        const targets: ShareTarget[] = []
+        for (let i = 0; i < users.length; i++) {
+            const target = new ShareTarget()
+            target.id = users[i].uid
+            target.isGroup = false
+            targets.push(target)
+        }
+        addTargets(targets, 0)
+    }
+    pickUsers(userOptions)
+}
+
+const addTargets = (targets: ShareTarget[], index: number) => {
+    if (index >= targets.length) {
+        toast(t('pan.share_success'))
+        load()
+        return
+    }
+    const target = targets[index]
+    panServerApi.setShare(fileId.value, target.isGroup, target.id, false)
+        .then((_res: UTSJSONObject | null): void => {
+            addTargets(targets, index + 1)
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.share_failed'), err))
+            addTargets(targets, index + 1)
+        })
+}
+
+const remove = (share: PanShare) => {
+    panServerApi.removeShare(share.id)
+        .then((_res: UTSJSONObject | null): void => {
+            load()
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.share_failed'), err))
+        })
+}
+
+function toast(title: string): void {
+    uni.showToast({ title: title, icon: 'none' } as ShowToastOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbar {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.toolbar-title {
+    flex: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.add {
+    width: 40px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.list {
+    flex: 1;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.row-icon {
+    width: 30px;
+    flex-shrink: 0;
+}
+
+.row-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin-left: 10px;
+    overflow: hidden;
+}
+
+.row-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.row-sub {
+    margin-top: 3px;
+}
+
+.remove {
+    flex-shrink: 0;
+    padding: 4px 6px;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 28px 0;
+}
+</style>

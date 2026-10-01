@@ -1,0 +1,166 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.primaryBackground }">
+        <scroll-view class="list" direction="vertical">
+            <view v-for="version in versions" :key="version.versionNo" class="row"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">v{{ version.versionNo }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ subtitle(version) }}</text>
+                </view>
+                <view v-if="version.current" class="badge" :style="{ backgroundColor: c.accentSoft }">
+                    <text :style="{ color: c.accent, fontSize: fontPx(FONT_XS) }">{{ t('pan.version_current') }}</text>
+                </view>
+                <view v-else class="restore" :hover-class="pressedClass" hover-stay-time="80"
+                    @tap="restore(version)">
+                    <text :style="{ color: c.accent, fontSize: fontPx(FONT_BASE) }">{{ t('pan.version_restore') }}</text>
+                </view>
+            </view>
+
+            <view v-if="loading" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+            </view>
+            <view v-else-if="versions.length == 0" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.no_versions') }}</text>
+            </view>
+        </scroll-view>
+
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 文件的历史版本列表 + 恢复。对齐 flutter 网盘文件菜单里的「历史版本」。
+ */
+import panServerApi from "@/api/panServerApi.uts";
+import { PanFileVersion, formatPanSize, panErrorText } from "@/api/panModel.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+import { panTimeText } from "./panUi.uts";
+
+defineOptions({
+    name: "PanVersionsPage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const fileId = ref<number>(0)
+const versions = ref<PanFileVersion[]>([] as PanFileVersion[])
+const loading = ref<boolean>(true)
+
+onLoad((options: OnLoadOptions) => {
+    fileId.value = parseInt(options['fileId'] ?? '0')
+    const name = decodeURIComponent(options['fileName'] ?? '')
+    if (name != '') {
+        uni.setNavigationBarTitle({ title: name + ' · ' + t('pan.versions_title') } as SetNavigationBarTitleOptions)
+    }
+    load()
+})
+
+const load = () => {
+    loading.value = true
+    panServerApi.getVersions(fileId.value)
+        .then((list: PanFileVersion[]): void => {
+            versions.value = list
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+        })
+}
+
+const subtitle = (version: PanFileVersion): string => {
+    let text = formatPanSize(version.size)
+    const editor = version.editorName != '' ? version.editorName : version.editorId
+    if (editor != '') {
+        text = text + '  ·  ' + editor
+    }
+    const time = panTimeText(version.createdAt)
+    if (time != '') {
+        text = text + '  ·  ' + time
+    }
+    return text
+}
+
+const restore = (version: PanFileVersion) => {
+    panServerApi.restoreVersion(fileId.value, version.versionNo)
+        .then((_res: UTSJSONObject | null): void => {
+            toast(t('pan.restore_success'))
+            uni.navigateBack({} as NavigateBackOptions)
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.restore_failed'), err))
+        })
+}
+
+function toast(title: string): void {
+    uni.showToast({ title: title, icon: 'none' } as ShowToastOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.list {
+    flex: 1;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.row-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.row-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.row-sub {
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.badge {
+    flex-shrink: 0;
+    margin-left: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+.restore {
+    flex-shrink: 0;
+    margin-left: 10px;
+    padding: 4px 10px;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 28px 0;
+}
+</style>

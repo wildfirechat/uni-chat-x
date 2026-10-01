@@ -7,6 +7,7 @@
  */
 import UserInfo from "../wfc/model/userInfo.uts";
 import Conversation from "../wfc/model/conversation.uts";
+import GroupInfo from "../wfc/model/groupInfo.uts";
 import { contactState } from "@/store.uts";
 
 export class PickUsersOptions {
@@ -182,5 +183,47 @@ export function notifyPickedConversation(conversation: Conversation): void {
     pickConversationOptions = null
     if (options != null) {
         options.successCB?.(conversation)
+    }
+}
+
+/**
+ * 选群（多选）。在线文档桥的 `chooseGroup` 用；对齐 flutter `PickGroupScreen`。
+ * 用户取消（返回）时 [successCB] 收到空数组，调用方据此回 `-1`。
+ */
+export class PickGroupsOptions {
+    /** 候选群，空则用 contactState.favGroupList */
+    groups: GroupInfo[] = []
+    /** 预先选中的群 id */
+    initialCheckedIds: string[] = []
+    title = ''
+    confirmTitle = '确定'
+    successCB: ((groups: GroupInfo[]) => void) | null = null
+}
+
+let pickGroupsOptions: PickGroupsOptions | null = null
+
+export function pickGroups(options: PickGroupsOptions): void {
+    if (options.groups.length == 0) {
+        options.groups = contactState.favGroupList
+    }
+    pickGroupsOptions = options
+    uni.navigateTo({
+        url: '/pages/pan/PickGroupPage',
+        fail: (err) => {
+            console.log('nav to PickGroupPage err', err)
+            pickGroupsOptions = null
+        }
+    } as NavigateToOptions)
+}
+
+export function currentPickGroupsOptions(): PickGroupsOptions | null {
+    return pickGroupsOptions
+}
+
+export function notifyPickedGroups(groups: GroupInfo[]): void {
+    const options = pickGroupsOptions
+    pickGroupsOptions = null
+    if (options != null) {
+        options.successCB?.(groups)
     }
 }

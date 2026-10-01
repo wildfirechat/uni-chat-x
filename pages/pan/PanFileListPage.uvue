@@ -1,0 +1,478 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.primaryBackground }">
+        <!-- 写入权限才有新建 / 上传 -->
+        <view v-if="canWrite" class="toolbar" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+            <view class="tool" :hover-class="pressedClass" hover-stay-time="80" @tap="createFolder">
+                <text class="icomoon tool-icon" :style="{ color: c.accent, fontSize: iconPx(18) }">&#xf2c7;</text>
+                <text class="tool-label" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.new_folder') }}</text>
+            </view>
+            <view class="tool" :hover-class="pressedClass" hover-stay-time="80" @tap="pickAndUpload">
+                <text class="icomoon tool-icon" :style="{ color: c.accent, fontSize: iconPx(18) }">&#xf255;</text>
+                <text class="tool-label" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.upload') }}</text>
+            </view>
+        </view>
+
+        <!-- 上传进度条 -->
+        <view v-if="uploading" class="upload-strip" :style="{ backgroundColor: c.surface }">
+            <text class="upload-name" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_XS) }">{{ uploadName }}</text>
+            <text :style="{ color: c.textSecondary, fontSize: fontPx(FONT_XS) }">{{ uploadProgress }}%</text>
+        </view>
+
+        <scroll-view class="list" direction="vertical">
+            <view v-for="file in files" :key="file.fileId" class="row" :hover-class="pressedClass"
+                hover-stay-time="80" @tap="openEntry(file)"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <text v-if="file.isFolder()" class="icomoon file-symbol" :style="{ color: '#FFB300', fontSize: iconPx(30) }">&#xf2e0;</text>
+                <image v-else class="file-icon" :src="panFileIcon(file)" mode="aspectFill" />
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ file.name }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ panFileSubtitle(file) }}</text>
+                </view>
+                <text class="icomoon more" :style="{ color: c.textTertiary, fontSize: iconPx(20) }"
+                    @tap.stop="showFileMenu(file)">&#xf396;</text>
+            </view>
+
+            <view v-if="loading" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+            </view>
+            <view v-else-if="failed" class="status" @tap="load">
+                <text :style="{ color: c.textSecondary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.load_failed') }}</text>
+                <text :style="{ color: c.accent, fontSize: fontPx(FONT_BASE) }">{{ t('pan.retry') }}</text>
+            </view>
+            <view v-else-if="files.length == 0" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.empty_folder') }}</text>
+            </view>
+        </scroll-view>
+
+        <bottom-action-sheet v-model="sheetVisible" :items="sheetItems" @select="onSheetSelect" />
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 单个文件夹的文件列表（移动端）。对齐 flutter `pan/pan_file_list_screen.dart` +
+ * `pan_folder_state.dart`：一个文件夹一页，进子目录再 push。
+ *
+ * 页面参数走 query（都是标量）：spaceId / spaceName / spaceType / ownerId / canWrite /
+ * folderId / folderName。移动 / 复制 / 分享 / 版本各自跳独立页面，返回后 onShow 刷新。
+ */
+import wfc from "@/wfc/client/wfc.uts";
+import MessageContentMediaType from "@/wfc/messages/messageContentMediaType.uts";
+import Config from "@/config.uts";
+import panServerApi from "@/api/panServerApi.uts";
+import { PanFile, panErrorText } from "@/api/panModel.uts";
+import { docOpenUrl } from "@/api/panDocUrl.uts";
+import { toLocalFilePath } from "@/common/filePath.uts";
+import { downloadAndOpen } from "@/common/panFileOpen.uts";
+import { showEditDialog, showConfirmDialog } from "@/common/prompt.uts";
+import { ActionSheetItem } from "@/components/bottom-action-sheet/actionSheetItem.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, iconPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+import { panFileIcon, panFileSubtitle } from "./panUi.uts";
+
+defineOptions({
+    name: "PanFileListPage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const spaceId = ref<number>(0)
+const spaceName = ref<string>('')
+const spaceType = ref<number>(0)
+const ownerId = ref<string>('')
+const canWrite = ref<boolean>(false)
+const folderId = ref<number>(0)
+const folderName = ref<string>('')
+
+const files = ref<PanFile[]>([] as PanFile[])
+const loading = ref<boolean>(true)
+const failed = ref<boolean>(false)
+
+const uploading = ref<boolean>(false)
+const uploadName = ref<string>('')
+const uploadProgress = ref<number>(0)
+
+const sheetVisible = ref<boolean>(false)
+const sheetItems = ref<ActionSheetItem[]>([] as ActionSheetItem[])
+let selectedFile: PanFile | null = null
+
+onLoad((options: OnLoadOptions) => {
+    spaceId.value = parseInt(options['spaceId'] ?? '0')
+    spaceName.value = decodeURIComponent(options['spaceName'] ?? '')
+    spaceType.value = parseInt(options['spaceType'] ?? '0')
+    ownerId.value = decodeURIComponent(options['ownerId'] ?? '')
+    canWrite.value = (options['canWrite'] ?? '0') == '1'
+    folderId.value = parseInt(options['folderId'] ?? '0')
+    folderName.value = decodeURIComponent(options['folderName'] ?? '')
+    uni.setNavigationBarTitle({
+        title: folderName.value != '' ? folderName.value : spaceName.value
+    } as SetNavigationBarTitleOptions)
+})
+
+const load = () => {
+    if (!Config.isPanEnabled()) {
+        loading.value = false
+        failed.value = true
+        return
+    }
+    loading.value = files.value.length == 0
+    failed.value = false
+    panServerApi.getSpaceFiles(spaceId.value, folderId.value)
+        .then((list: PanFile[]): void => {
+            // 文件夹排前面，其余保持服务端顺序
+            const folders: PanFile[] = []
+            const others: PanFile[] = []
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].isFolder()) {
+                    folders.push(list[i])
+                } else {
+                    others.push(list[i])
+                }
+            }
+            files.value = folders.concat(others)
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+            failed.value = files.value.length == 0
+        })
+}
+
+onShow(() => {
+    load()
+})
+
+const openEntry = (file: PanFile) => {
+    if (file.isFolder()) {
+        openFolder(file)
+        return
+    }
+    if (file.canOpenOnline() && Config.getPanDocBase() != '') {
+        openPage(docOpenUrl(file.fileId))
+        return
+    }
+    download(file)
+}
+
+const openFolder = (file: PanFile) => {
+    const url = '/pages/pan/PanFileListPage?spaceId=' + spaceId.value
+        + '&spaceName=' + encodeURIComponent(spaceName.value)
+        + '&spaceType=' + spaceType.value
+        + '&ownerId=' + encodeURIComponent(ownerId.value)
+        + '&canWrite=' + (canWrite.value ? '1' : '0')
+        + '&folderId=' + file.fileId
+        + '&folderName=' + encodeURIComponent(file.name)
+    uni.navigateTo({ url: url, fail: (err) => { console.log('nav to child folder err', err) } } as NavigateToOptions)
+}
+
+const openPage = (url: string) => {
+    if (url == '') {
+        return
+    }
+    uni.navigateTo({
+        url: '/pages/pan/PanDocWebViewPage?url=' + encodeURIComponent(url),
+        fail: (err) => { console.log('nav to PanDocWebViewPage err', err) }
+    } as NavigateToOptions)
+}
+
+const openPicker = (url: string) => {
+    uni.navigateTo({ url: url, fail: (err) => { console.log('nav err', url, err) } } as NavigateToOptions)
+}
+
+// ---- 新建 / 上传 ----
+
+const createFolder = () => {
+    showEditDialog(t('pan.new_folder'), '', t('pan.folder_name'), (name: string) => {
+        panServerApi.createFolder(spaceId.value, name, folderId.value)
+            .then((_file: PanFile): void => {
+                toast(t('pan.create_success'))
+                load()
+            })
+            .catch((err: any | null): void => {
+                toast(panErrorText(t('pan.create_failed'), err))
+            })
+    })
+}
+
+const pickAndUpload = () => {
+    wfc.chooseFile('all', (res: UTSJSONObject) => {
+        const path = toLocalFilePath(res.getString('path') ?? '')
+        const name = res.getString('name') ?? ''
+        const size = res.getNumber('size') ?? 0
+        if (path == '') {
+            return
+        }
+        uploadFile(path, name, size)
+    }, (err: number) => {
+        console.log('chooseFile fail', err)
+    })
+}
+
+const uploadFile = (path: string, name: string, size: number) => {
+    uploading.value = true
+    uploadName.value = name
+    uploadProgress.value = 0
+    panServerApi.getSpaceFiles(spaceId.value, folderId.value)
+        .then((existing: PanFile[]): void => {
+            const uniqueName = panServerApi.uniqueFileName(existing, name)
+            wfc.uploadMediaFile(path, MessageContentMediaType.File, (remoteUrl: string) => {
+                panServerApi.createFile(spaceId.value, uniqueName, size, remoteUrl, folderId.value)
+                    .then((_file: PanFile): void => {
+                        uploading.value = false
+                        toast(t('pan.upload_success'))
+                        load()
+                    })
+                    .catch((err: any | null): void => {
+                        uploading.value = false
+                        toast(panErrorText(t('pan.upload_failed'), err))
+                    })
+            }, (err: number) => {
+                uploading.value = false
+                console.log('upload media fail', err)
+                toast(t('pan.upload_failed'))
+            }, (current: number, total: number) => {
+                uploadProgress.value = total > 0 ? Math.floor(current * 100 / total) : 0
+            })
+        })
+        .catch((err: any | null): void => {
+            uploading.value = false
+            toast(panErrorText(t('pan.upload_failed'), err))
+        })
+}
+
+// ---- 文件操作菜单 ----
+
+const menuItem = (label: string, tag: string, icon: string, danger: boolean = false): ActionSheetItem => {
+    const item = new ActionSheetItem(label, tag)
+    item.icon = icon
+    item.danger = danger
+    return item
+}
+
+const showFileMenu = (file: PanFile) => {
+    selectedFile = file
+    const items: ActionSheetItem[] = []
+    if (file.isFolder()) {
+        items.push(menuItem(t('common.open'), 'open', '\uf38a'))
+    } else {
+        if (file.canOpenOnline()) {
+            items.push(menuItem(t('pan.open_online'), 'openOnline', '\uf133'))
+        }
+        items.push(menuItem(file.canOpenOnline() ? t('pan.download') : t('pan.download_or_open'), 'download', '\uf2dd'))
+    }
+    if (canWrite.value) {
+        if (!file.isFolder()) {
+            items.push(menuItem(t('pan.share'), 'share', '\uf2f8'))
+            items.push(menuItem(t('pan.versions'), 'versions', '\uf26e'))
+        }
+        items.push(menuItem(t('pan.rename'), 'rename', '\uf2bf'))
+        items.push(menuItem(t('pan.move'), 'move', '\uf263'))
+        items.push(menuItem(t('pan.copy'), 'copy', '\uf134'))
+        items.push(menuItem(t('pan.delete'), 'delete', '\uf252', true))
+    }
+    sheetItems.value = items
+    sheetVisible.value = true
+}
+
+const onSheetSelect = (tag: string) => {
+    const file = selectedFile
+    if (file == null) {
+        return
+    }
+    selectedFile = null
+    switch (tag) {
+        case 'open':
+            openFolder(file!)
+            break
+        case 'openOnline':
+            openPage(docOpenUrl(file!.fileId))
+            break
+        case 'download':
+            download(file!)
+            break
+        case 'share':
+            openPicker('/pages/pan/PanSharePage?fileId=' + file!.fileId + '&fileName=' + encodeURIComponent(file!.name))
+            break
+        case 'versions':
+            openPicker('/pages/pan/PanVersionsPage?fileId=' + file!.fileId + '&fileName=' + encodeURIComponent(file!.name))
+            break
+        case 'rename':
+            renameFile(file!)
+            break
+        case 'move':
+            openPicker('/pages/pan/PanDestinationPickerPage?fileId=' + file!.fileId + '&mode=move')
+            break
+        case 'copy':
+            openPicker('/pages/pan/PanDestinationPickerPage?fileId=' + file!.fileId + '&mode=copy')
+            break
+        case 'delete':
+            deleteFile(file!)
+            break
+        default:
+            break
+    }
+}
+
+const download = (file: PanFile) => {
+    panServerApi.getFileDownloadUrl(file.fileId)
+        .then((url: string): void => {
+            if (url != '') {
+                downloadAndOpen(url)
+            }
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.get_download_url_failed'), err))
+        })
+}
+
+const renameFile = (file: PanFile) => {
+    showEditDialog(t('pan.rename'), file.name, t('pan.new_name'), (name: string) => {
+        panServerApi.renameFile(file.fileId, name)
+            .then((_res: UTSJSONObject | null): void => {
+                toast(t('pan.rename_success'))
+                load()
+            })
+            .catch((err: any | null): void => {
+                toast(panErrorText(t('pan.rename_failed'), err))
+            })
+    })
+}
+
+const deleteFile = (file: PanFile) => {
+    showConfirmDialog(t('pan.delete'), t('pan.delete_confirm').replace('{0}', file.name), true, () => {
+        panServerApi.deleteFile(file.fileId)
+            .then((_res: UTSJSONObject | null): void => {
+                toast(t('pan.delete_success'))
+                load()
+            })
+            .catch((err: any | null): void => {
+                toast(panErrorText(t('pan.delete_failed'), err))
+            })
+    })
+}
+
+function toast(title: string): void {
+    uni.showToast({ title: title, icon: 'none' } as ShowToastOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbar {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 8px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.tool {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 0;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.tool-icon {
+    margin-right: 6px;
+}
+
+.tool-label {
+    flex-shrink: 0;
+}
+
+.upload-strip {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+}
+
+.upload-name {
+    flex: 1;
+    margin-right: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.list {
+    flex: 1;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px 10px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.file-symbol {
+    width: 38px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.file-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.row-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin-left: 12px;
+    overflow: hidden;
+}
+
+.row-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.row-sub {
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.more {
+    flex-shrink: 0;
+    padding: 4px 6px;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 0;
+}
+</style>

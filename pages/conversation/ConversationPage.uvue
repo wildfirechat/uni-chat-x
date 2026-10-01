@@ -94,6 +94,11 @@ import { isAsrEnabled, speechToText } from "@/common/asr.uts";
 import { isEarpieceMode, setEarpieceMode, applyAudioRoute } from "@/common/audioPlayMode.uts";
 import { isFavoriteAble, favoriteMessage } from "@/common/favorite.uts";
 import { report } from "@/common/report.uts";
+import FileMessageContent from "@/wfc/messages/fileMessageContent.uts";
+import panServerApi from "@/api/panServerApi.uts";
+import { isOnlineDocName } from "@/api/panDocUrl.uts";
+import { saveFileMessageToMyPan } from "@/common/panSave.uts";
+import { openDocByUrl } from "@/common/panFileOpen.uts";
 import { colors, AppColors } from "@/common/theme.uts";
 import { fontPx } from "@/common/layoutScale.uts";
 import { t, t1 } from "@/i18n/i18n.uts";
@@ -811,6 +816,18 @@ const isDownloadAble = (message: Message): boolean => {
     return isSavableMessage(message);
 }
 
+/** 文件消息且有 remotePath 时返回文件内容，否则 null（网盘菜单项据此显示） */
+const fileContentOf = (message: Message): FileMessageContent | null => {
+    const content = message.messageContent
+    if (content instanceof FileMessageContent) {
+        const fileContent = content as FileMessageContent
+        if (fileContent.remotePath != '') {
+            return fileContent
+        }
+    }
+    return null
+}
+
 const isForwardable = (message: Message): boolean => {
     if (message.messageContent instanceof SoundMessageContent) {
         return false;
@@ -1132,6 +1149,15 @@ const showMessageContextMenu = (e: UniTouchEvent, message: Message) => {
     if (isDownloadAble(message)) {
         items.push(new PopupMenuItem(isSaveToAlbumMessage(message) ? '保存到相册' : '保存到本地', 'save', '\uf41f'))
     }
+    // 网盘专属项：只有配了网盘（isPanEnabled）的文件消息才有
+    const fileContent = fileContentOf(message)
+    if (panServerApi.isAvailable() && fileContent != null) {
+        if (isOnlineDocName(fileContent!.name) && Config.getPanDocBase() != '') {
+            items.push(new PopupMenuItem(t('pan.online_doc_preview'), 'docOnlinePreview', '\uf133'))
+        }
+        items.push(new PopupMenuItem(t('pan.save_to_my_pan'), 'panSave', '\uf40a'))
+        items.push(new PopupMenuItem(t('pan.save_to_my_pan_and_open'), 'panSaveOpen', '\uf378'))
+    }
     if (isSpeechToTextable(message)) {
         items.push(new PopupMenuItem(t('asr.speech_to_text'), 'speechToText', '\uf12e'))
     }
@@ -1196,6 +1222,24 @@ const showDeleteOptions = (message: Message) => {
     } as ShowActionSheetOptions)
 }
 
+/** 长按菜单「在线预览」：文档格式走只读在线文档页 */
+const previewPanFile = (message: Message) => {
+    const fileContent = fileContentOf(message)
+    if (fileContent == null) {
+        return
+    }
+    openDocByUrl(fileContent!.remotePath, fileContent!.name)
+}
+
+/** 长按菜单「存到网盘 / 存到网盘并打开」 */
+const savePanFile = (message: Message, openAfterSave: boolean) => {
+    const fileContent = fileContentOf(message)
+    if (fileContent == null) {
+        return
+    }
+    saveFileMessageToMyPan(fileContent!.name, fileContent!.size, fileContent!.remotePath, '', openAfterSave)
+}
+
 const onContextMenuItemSelect = (t: PopupMenuItem) => {
     const message = contextMenuMessage.value
     if (message == null) {
@@ -1222,6 +1266,15 @@ const onContextMenuItemSelect = (t: PopupMenuItem) => {
             break;
         case 'save':
             saveMessageMedia(message);
+            break;
+        case 'docOnlinePreview':
+            previewPanFile(message);
+            break;
+        case 'panSave':
+            savePanFile(message, false);
+            break;
+        case 'panSaveOpen':
+            savePanFile(message, true);
             break;
         case 'speechToText':
             speechToTextMessage(message);

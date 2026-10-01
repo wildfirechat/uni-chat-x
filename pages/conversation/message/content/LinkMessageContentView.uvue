@@ -12,6 +12,7 @@
 <script setup lang="uts">
 import Message from "@/wfc/messages/message.uts";
 import LinkMessageContent from "@/wfc/messages/linkMessageContent.uts";
+import { isDocUrl } from "@/api/panDocUrl.uts";
 
 import { colors, AppColors } from "@/common/theme.uts";
 import { fontPx } from "@/common/layoutScale.uts";
@@ -42,6 +43,16 @@ const title = computed<string>((): string => {
 const openLink = () => {
     const url = content.value.url
     if (url == '') {
+        return
+    }
+    // 在线文档页要靠客户端桥取认证码登录，系统浏览器 / 普通 web-view 打不开，必须走内置文档页
+    if (isDocUrl(url)) {
+        uni.navigateTo({
+            url: '/pages/pan/PanDocWebViewPage?url=' + encodeURIComponent(url),
+            fail: (err) => {
+                console.log('nav to PanDocWebViewPage err', err)
+            }
+        } as NavigateToOptions)
         return
     }
     uni.navigateTo({

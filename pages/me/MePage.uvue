@@ -24,7 +24,12 @@
             <option-item :title="t('me.favorites')" left-image="/static/image/setting/setting_favorite.png"
                 @tap="open('/pages/me/FavoriteListPage')" />
             <option-item :title="t('me.files')" left-image="/static/image/setting/setting_file.png"
-                :show-bottom-divider="false" @tap="open('/pages/me/FileRecordsPage')" />
+                :show-bottom-divider="panEnabled" @tap="open('/pages/me/FileRecordsPage')" />
+            <!-- 网盘 / 在线文档：只有配了 PAN_SERVER 才显示（未配则整块隐藏，见 Config.isPanEnabled） -->
+            <option-item v-if="panEnabled" :title="t('me.net_disk')" left-icon="&#xf37a;"
+                :show-bottom-divider="panDocEnabled" @tap="open('/pages/pan/PanHomePage')" />
+            <option-item v-if="panDocEnabled" :title="t('me.online_docs')" left-icon="&#xf12f;"
+                :show-bottom-divider="false" @tap="open('/pages/pan/PanDocsPage')" />
         </form-card>
 
         <section-divider />
@@ -73,6 +78,10 @@ import { t } from "@/i18n/i18n.uts";
 import { ActionSheetItem } from "@/components/bottom-action-sheet/actionSheetItem.uts";
 
 const c = computed<AppColors>((): AppColors => colors())
+
+// 网盘 / 在线文档入口门控：PAN_SERVER 没配就整块不显示（对齐 Config.isPanEnabled）。
+const panEnabled = computed<boolean>((): boolean => Config.isPanEnabled())
+const panDocEnabled = computed<boolean>((): boolean => Config.isPanDocEnabled())
 
 const portraitSheetVisible = ref<boolean>(false)
 const portraitSheetItems = computed<ActionSheetItem[]>((): ActionSheetItem[] => {

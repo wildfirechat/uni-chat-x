@@ -1,0 +1,284 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.primaryBackground }">
+        <!-- 顶部：当前选中的空间与目录，以及「保存到此处」 -->
+        <view class="header" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+            <view class="header-texts">
+                <text class="header-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ currentLabel }}</text>
+                <text class="header-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ t('pan.choose_destination') }}</text>
+            </view>
+            <view v-if="pickedSpace != null" class="confirm" :hover-class="pressedClass" hover-stay-time="80"
+                @tap="confirm">
+                <text :style="{ color: c.onAccent, fontSize: fontPx(FONT_BASE) }">{{ modeLabel }}</text>
+            </view>
+        </view>
+
+        <scroll-view class="list" direction="vertical">
+            <!-- 第一步：选空间 -->
+            <view v-if="pickedSpace == null">
+                <view v-for="space in spaces" :key="space.spaceId" class="row"
+                    :hover-class="pressedClass" hover-stay-time="80" @tap="selectSpace(space)"
+                    :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                    <text class="icomoon row-icon" :style="{ color: c.accent, fontSize: iconPx(22) }">&#xf37a;</text>
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ panSpaceDisplayName(space) }}</text>
+                    <text class="arrow icomoon" :style="{ color: c.textTertiary, fontSize: iconPx(16) }">&#xf125;</text>
+                </view>
+            </view>
+
+            <!-- 第二步：选目标文件夹 -->
+            <view v-if="pickedSpace != null" class="row" :hover-class="pressedClass" hover-stay-time="80"
+                @tap="backToSpaces" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <text class="icomoon row-icon" :style="{ color: c.textSecondary, fontSize: iconPx(20) }">&#xf2ca;</text>
+                <text class="row-title" :style="{ color: c.textSecondary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.root_dir') }}</text>
+            </view>
+            <view v-for="folder in folders" :key="folder.fileId" class="row" :hover-class="pressedClass"
+                hover-stay-time="80" @tap="enterFolder(folder)"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <text class="icomoon row-icon" :style="{ color: '#FFB300', fontSize: iconPx(24) }">&#xf2e0;</text>
+                <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ folder.name }}</text>
+                <text class="arrow icomoon" :style="{ color: c.textTertiary, fontSize: iconPx(16) }">&#xf125;</text>
+            </view>
+
+            <view v-if="loading" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+            </view>
+        </scroll-view>
+
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 移动 / 复制时的目标选择：先选空间，再逐层进文件夹，确认保存到当前目录。
+ * 对齐 flutter `pan/pan_destination_picker.dart`（移动端部分）。
+ */
+import panServerApi from "@/api/panServerApi.uts";
+import { PanSpace, PanFile, panErrorText } from "@/api/panModel.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, iconPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+import { panSpaceDisplayName } from "./panUi.uts";
+
+defineOptions({
+    name: "PanDestinationPickerPage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const fileId = ref<number>(0)
+const mode = ref<string>('move')
+
+const spaces = ref<PanSpace[]>([] as PanSpace[])
+const folders = ref<PanFile[]>([] as PanFile[])
+const pickedSpace = ref<PanSpace | null>(null)
+const folderId = ref<number>(0)
+const folderName = ref<string>('')
+const loading = ref<boolean>(true)
+
+onLoad((options: OnLoadOptions) => {
+    fileId.value = parseInt(options['fileId'] ?? '0')
+    mode.value = options['mode'] ?? 'move'
+    uni.setNavigationBarTitle({
+        title: mode.value == 'copy' ? t('pan.copy') : t('pan.move')
+    } as SetNavigationBarTitleOptions)
+    loadSpaces()
+})
+
+const loadSpaces = () => {
+    loading.value = true
+    panServerApi.getVisibleSpaces()
+        .then((list: PanSpace[]): void => {
+            const writable: PanSpace[] = []
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].canWrite()) {
+                    writable.push(list[i])
+                }
+            }
+            spaces.value = writable
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+        })
+}
+
+const selectSpace = (space: PanSpace) => {
+    pickedSpace.value = space
+    folderId.value = 0
+    folderName.value = ''
+    loadFolders()
+}
+
+const backToSpaces = () => {
+    pickedSpace.value = null
+    folders.value = [] as PanFile[]
+    folderId.value = 0
+    folderName.value = ''
+}
+
+const loadFolders = () => {
+    const space = pickedSpace.value
+    if (space == null) {
+        return
+    }
+    loading.value = true
+    panServerApi.getSpaceFiles(space!.spaceId, folderId.value)
+        .then((list: PanFile[]): void => {
+            const result: PanFile[] = []
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].isFolder()) {
+                    result.push(list[i])
+                }
+            }
+            folders.value = result
+            loading.value = false
+        })
+        .catch((_err: any | null): void => {
+            loading.value = false
+        })
+}
+
+const enterFolder = (folder: PanFile) => {
+    folderId.value = folder.fileId
+    folderName.value = folder.name
+    loadFolders()
+}
+
+const currentLabel = computed<string>((): string => {
+    const space = pickedSpace.value
+    if (space == null) {
+        return t('pan.choose_destination')
+    }
+    let label = panSpaceDisplayName(space!)
+    if (folderName.value != '') {
+        label = label + ' / ' + folderName.value
+    }
+    return label
+})
+
+const modeLabel = computed<string>((): string => mode.value == 'copy' ? t('pan.copy') : t('pan.move'))
+
+const confirm = () => {
+    const space = pickedSpace.value
+    if (space == null) {
+        return
+    }
+    const target = space!
+    if (mode.value == 'copy') {
+        panServerApi.copyFile(fileId.value, target.spaceId, folderId.value)
+            .then((_res: UTSJSONObject | null): void => {
+                toast(t('pan.copy_success'))
+                uni.navigateBack({} as NavigateBackOptions)
+            })
+            .catch((err: any | null): void => {
+                toast(panErrorText(t('pan.copy_failed'), err))
+            })
+    } else {
+        panServerApi.moveFile(fileId.value, target.spaceId, folderId.value)
+            .then((_res: UTSJSONObject | null): void => {
+                toast(t('pan.move_success'))
+                uni.navigateBack({} as NavigateBackOptions)
+            })
+            .catch((err: any | null): void => {
+                toast(panErrorText(t('pan.move_failed'), err))
+            })
+    }
+}
+
+function toast(title: string): void {
+    uni.showToast({ title: title, icon: 'none' } as ShowToastOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.header {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.header-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.header-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.header-sub {
+    margin-top: 3px;
+}
+
+.confirm {
+    flex-shrink: 0;
+    margin-left: 12px;
+    padding: 6px 14px;
+    border-radius: 5px;
+    background-color: #1F64E4;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+}
+
+.list {
+    flex: 1;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.row-icon {
+    width: 30px;
+    flex-shrink: 0;
+}
+
+.row-title {
+    flex: 1;
+    margin-left: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.arrow {
+    flex-shrink: 0;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 0;
+}
+</style>

@@ -363,6 +363,54 @@
             }
         },
         {
+            "path": "pages/pan/PanHomePage",
+            "style": {
+                "navigationBarTitleText": "网盘"
+            }
+        },
+        {
+            "path": "pages/pan/PanFileListPage",
+            "style": {
+                "navigationBarTitleText": "文件"
+            }
+        },
+        {
+            "path": "pages/pan/PanDocsPage",
+            "style": {
+                "navigationBarTitleText": "文档"
+            }
+        },
+        {
+            "path": "pages/pan/PanDocWebViewPage",
+            "style": {
+                "navigationBarTitleText": "页面加载中..."
+            }
+        },
+        {
+            "path": "pages/pan/PanVersionsPage",
+            "style": {
+                "navigationBarTitleText": "历史版本"
+            }
+        },
+        {
+            "path": "pages/pan/PanSharePage",
+            "style": {
+                "navigationBarTitleText": "分享"
+            }
+        },
+        {
+            "path": "pages/pan/PanDestinationPickerPage",
+            "style": {
+                "navigationBarTitleText": "选择保存位置"
+            }
+        },
+        {
+            "path": "pages/pan/PickGroupPage",
+            "style": {
+                "navigationBarTitleText": "选择群聊"
+            }
+        },
+        {
             "path": "pages/discovery/DiscoveryPage",
             "style": {
                 "navigationBarTitleText": "发现"

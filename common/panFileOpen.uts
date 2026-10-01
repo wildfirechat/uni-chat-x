@@ -1,0 +1,85 @@
+/**
+ * 打开文件的统一入口，供会话里的文件消息、网盘文件列表共用。
+ *
+ * 对齐 flutter `utilities.dart` 的 `openFileByDefault` / `openFileOnline`：
+ * - 办公文档 / PDF（[isOnlineDocName]）→ 走在线文档只读预览（服务端代理取内容）；
+ * - 其余格式 → 下载到本地后交给系统应用打开。
+ */
+import Config from "../config.uts";
+import { isOnlineDocName, docViewUrl, docOpenUrl } from "../api/panDocUrl.uts";
+import { redirectMediaUrl } from "./mediaUrlRedirector.uts";
+
+function toast(title: string): void {
+    uni.showToast({
+        title: title,
+        icon: 'none'
+    } as ShowToastOptions)
+}
+
+/** 用内置文档 web-view 打开一个文档页地址。 */
+export function openDocPage(url: string): void {
+    if (url == '') {
+        return
+    }
+    uni.navigateTo({
+        url: '/pages/pan/PanDocWebViewPage?url=' + encodeURIComponent(url),
+        fail: (err) => {
+            console.log('nav to PanDocWebViewPage err', err)
+        }
+    } as NavigateToOptions)
+}
+
+/** 打开网盘里的某个文件（有 fileId，编辑/只读由服务端决定）。 */
+export function openOnlineDoc(fileId: number): void {
+    openDocPage(docOpenUrl(fileId))
+}
+
+/** 按链接只读预览一个在线文档。 */
+export function openDocByUrl(url: string, name: string): void {
+    openDocPage(docViewUrl(redirectMediaUrl(url), name))
+}
+
+/** 下载后用系统应用打开。 */
+export function downloadAndOpen(url: string): void {
+    if (url == '') {
+        toast('文件地址为空')
+        return
+    }
+    uni.showLoading({ title: '下载中...' } as ShowLoadingOptions)
+    uni.downloadFile({
+        url: url,
+        success: (res) => {
+            uni.hideLoading()
+            uni.openDocument({
+                filePath: res.tempFilePath,
+                success: (_) => {
+                    console.log('open document success')
+                },
+                fail: (err) => {
+                    console.log('open document fail', err)
+                    toast('已下载到 ' + res.tempFilePath)
+                }
+            } as OpenDocumentOptions)
+        },
+        fail: (err) => {
+            uni.hideLoading()
+            console.log('download file fail', err)
+            toast('下载失败')
+        }
+    } as DownloadFileOptions)
+}
+
+/**
+ * 点击文件消息 / 网盘文件的默认行为：文档格式走在线只读预览，其余交系统打开。
+ * 未配置网盘或不是文档格式时退化为原系统打开，保证老行为不变。
+ */
+export function openFileByDefault(name: string, url: string): void {
+    if (url == '') {
+        return
+    }
+    if (Config.isPanEnabled() && Config.getPanDocBase() != '' && isOnlineDocName(name)) {
+        openDocByUrl(url, name)
+        return
+    }
+    downloadAndOpen(url)
+}

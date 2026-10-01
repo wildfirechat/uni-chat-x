@@ -1,0 +1,82 @@
+/**
+ * 网盘页面共用的小工具：空间/文件显示名、图标、尺寸/时间文案。
+ *
+ * 抽出来给 PanHomePage / PanFileListPage / PanDocsPage / PanSharePage 共用，
+ * 与 flutter `pan_widgets.dart` 的 `panSpaceDisplayName` / `PanFileIcon` 对应。
+ */
+import { t } from "@/i18n/i18n.uts";
+import { PanSpace, PanSpaceType, PanFile, formatPanSize } from "@/api/panModel.uts";
+import { getFiletypeIcon } from "@/pages/util/helper.uts";
+
+/** 空间名一律按类型取本地化文案（服务端的 name 是建空间时写死的中文）。 */
+export function panSpaceDisplayName(space: PanSpace): string {
+    switch (space.spaceType) {
+        case PanSpaceType.globalPublic:
+            return t('pan.global_public_space')
+        case PanSpaceType.userPublic:
+            return t('pan.my_public_space')
+        case PanSpaceType.userPrivate:
+            return t('pan.my_private_space')
+        default:
+            return space.name
+    }
+}
+
+/** 空间图标（icomoon 码位），三类空间图形不同。 */
+export function panSpaceIcon(space: PanSpace): string {
+    switch (space.spaceType) {
+        case PanSpaceType.userPrivate:
+            return '\uf3a0' // ion-android-person
+        case PanSpaceType.userPublic:
+            return '\uf38a' // ion-android-folder-open
+        default:
+            return '\uf39e' // ion-android-people
+    }
+}
+
+/** 空间图标的着色 —— 个人 / 我的公共 / 全局公共各一色。 */
+export function panSpaceIconColor(space: PanSpace): string {
+    switch (space.spaceType) {
+        case PanSpaceType.userPrivate:
+            return '#1F64E4'
+        case PanSpaceType.userPublic:
+            return '#07C160'
+        default:
+            return '#FF9500'
+    }
+}
+
+/** 文件图标（图片路径）。文件夹在模板里用 icomoon 字形画，不用这个。 */
+export function panFileIcon(file: PanFile): string {
+    return '/static/image/filetypes/' + getFiletypeIcon(file.extension())
+}
+
+/** 文件行副标题：大小 + 创建者。 */
+export function panFileSubtitle(file: PanFile): string {
+    if (file.isFolder()) {
+        return t1Pan('pan.item_count', '' + file.childCount)
+    }
+    let text = formatPanSize(file.size)
+    const creator = file.creatorName != '' ? file.creatorName : file.creatorId
+    if (creator != '') {
+        text = text + '  ·  ' + creator
+    }
+    return text
+}
+
+/** 服务端时间是 LocalDateTime 序列化串，原样截到分钟显示，避免各端 Date 解析差异。 */
+export function panTimeText(time: string): string {
+    if (time == '') {
+        return ''
+    }
+    let value = time.replace('T', ' ')
+    if (value.length > 16) {
+        value = value.substring(0, 16)
+    }
+    return value
+}
+
+/** t1 的本地副本：避免为了一个占位符再从 i18n 导入 t1。 */
+function t1Pan(key: string, arg0: string): string {
+    return t(key).replace('{0}', arg0)
+}

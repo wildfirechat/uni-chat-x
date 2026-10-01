@@ -100,6 +100,19 @@ export default class Config {
     static POLL_SERVER = 'https://poll.wildfirechat.net';
     static POLL_SERVER_BACKUP = '';
 
+    // 网盘服务地址 —— 独立部署的 wf-pan-server。可配服务根（如 'https://host/pan'，
+    // 客户端 API 会补成 {PAN_SERVER}/api/v1），也可直接配完整的 API 根地址
+    // （如 'https://host/pan/api/v1'）。鉴权走 getAuthCode（appId 'admin'、type 2），
+    // 与接龙 / 投票共用 api/authCodeApiClient.uts。
+    // 置空 = 关闭网盘：不在「我的」显示网盘 / 在线文档入口，文件消息菜单不出现网盘项。
+    static PAN_SERVER = 'https://pan.wildfirechat.net';
+    static PAN_SERVER_BACKUP = '';
+
+    // 在线文档 H5 页面根地址，必须以 / 结尾（独立部署典型值 'https://host/pan/doc/'）。
+    // 留空时自动从 PAN_SERVER 派生；文档页靠 web-view 内的桥取认证码登录，只能在应用内置网页里打开。
+    static PAN_DOC_BASE = '';
+    static PAN_DOC_BASE_BACKUP = '';
+
     // 请仔细看注释
     // 仅仅是 HOST，没有 http 前缀，后面也没有端口
     // IM SERVER 的 host 地址，一定要和 APP_SERVER 对应起来，即 APP_SERVER 上配置的 im-server 和下面所配置的im-server 是同一个
@@ -314,6 +327,64 @@ export default class Config {
 
     static getPollServer(): string {
         return selectServer(Config.POLL_SERVER, Config.POLL_SERVER_BACKUP)
+    }
+
+    /**
+     * 网盘客户端 API 根地址（含 `/api/v1`），未配置时为空串。
+     *
+     * PAN_SERVER 既可以直接配服务根（如 'https://host/pan'，按约定补 `/api/v1`），
+     * 也可以配完整的 API 地址（如 'https://host/pan/api/v1'），两种都认。
+     */
+    static getPanServer(): string {
+        return Config.getPanApiBase()
+    }
+
+    /** 规范化后的网盘 API 地址：末尾带 `/api/v1`；未配置时为空串。 */
+    static getPanApiBase(): string {
+        let base = selectServer(Config.PAN_SERVER, Config.PAN_SERVER_BACKUP).trim()
+        if (base == '') {
+            return ''
+        }
+        if (base.endsWith('/')) {
+            base = base.substring(0, base.length - 1)
+        }
+        if (base.endsWith('/api/v1')) {
+            return base
+        }
+        return base + '/api/v1'
+    }
+
+    /** 网盘是否配置。所有网盘 / 在线文档入口的门控条件。 */
+    static isPanEnabled(): boolean {
+        return Config.getPanApiBase() != ''
+    }
+
+    /**
+     * 在线文档 H5 根地址，保证以 / 结尾；未配置时为空串。
+     *
+     * 未单独配置 PAN_DOC_BASE 时从网盘 API 地址派生（`.../api/v1` -> `.../doc/`），
+     * 与服务端 `pan.public_path=/pan` 时文档页在 `/pan/doc/` 的约定一致。
+     */
+    static getPanDocBase(): string {
+        let base = selectServer(Config.PAN_DOC_BASE, Config.PAN_DOC_BASE_BACKUP).trim()
+        if (base == '') {
+            const api = Config.getPanApiBase()
+            if (api == '') {
+                return ''
+            }
+            const idx = api.lastIndexOf('/api/v1')
+            const root = idx > 0 ? api.substring(0, idx) : api
+            base = root + '/doc/'
+        }
+        if (base != '' && !base.endsWith('/')) {
+            base = base + '/'
+        }
+        return base
+    }
+
+    /** 在线文档页是否可用（配了网盘地址即可，文档地址可派生）。 */
+    static isPanDocEnabled(): boolean {
+        return Config.isPanEnabled() && Config.getPanDocBase() != ''
     }
 
     /**

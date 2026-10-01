@@ -1,0 +1,228 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.surface }">
+        <view class="search-bar" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+            <view class="search-box" :style="{ backgroundColor: c.inputBg }">
+                <text class="icomoon search-icon" :style="{ color: c.textTertiary }">&#xf4a4;</text>
+                <input class="search-input" :value="query" :placeholder="t('common.search')" placeholder-class="search-placeholder"
+                    @input="onQueryInput" />
+            </view>
+        </view>
+        <list-view class="list" direction="vertical">
+            <list-item v-for="group in filtered" :key="group.target" class="row-item">
+                <view class="row" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }"
+                    :hover-class="pressedClass" hover-stay-time="80" @tap="toggle(group)">
+                    <image class="portrait" :src="portraitOf(group)" mode="aspectFill"
+                        :style="{ backgroundColor: c.inputBg }" />
+                    <text class="title" :style="{ color: c.textPrimary }">{{ group.name }}</text>
+                    <text v-if="isChecked(group)" class="icomoon check" :style="{ color: c.accent }">&#xf122;</text>
+                </view>
+            </list-item>
+        </list-view>
+        <view class="footer" :style="{ backgroundColor: c.surface, borderTopColor: c.hairlineSoft }">
+            <view class="confirm" :hover-class="pressedClass" hover-stay-time="80" @tap="confirm">
+                <text :style="{ color: c.onAccent }">{{ confirmLabel }}</text>
+            </view>
+        </view>
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 选择群聊（多选），供在线文档桥的 `chooseGroup` 使用。
+ * 对齐 flutter `contact/pick_group_screen.dart`：取消（返回）时回调空数组。
+ *
+ * 本页在 list-view 里，走鸿蒙 vapor 的复用渲染路径：尺寸 / 字号留在 class，颜色走 :style。
+ */
+import Config from "@/config.uts";
+import GroupInfo from "@/wfc/model/groupInfo.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { currentPickGroupsOptions, notifyPickedGroups } from "@/common/picker.uts";
+import { t } from "@/i18n/i18n.uts";
+
+defineOptions({
+    name: "PickGroupPage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const groups = ref<GroupInfo[]>([] as GroupInfo[])
+const checkedIds = ref<string[]>([] as string[])
+const query = ref<string>('')
+
+let confirmed = false
+
+onLoad((_options: OnLoadOptions) => {
+    const options = currentPickGroupsOptions()
+    if (options != null) {
+        groups.value = options.groups
+        checkedIds.value = options.initialCheckedIds
+        if (options.title != '') {
+            uni.setNavigationBarTitle({ title: options.title } as SetNavigationBarTitleOptions)
+        }
+    }
+})
+
+onUnload(() => {
+    // 直接返回（取消）时回一次空数组，避免调用方的 Promise 悬空
+    if (!confirmed) {
+        notifyPickedGroups([] as GroupInfo[])
+    }
+})
+
+const filtered = computed<GroupInfo[]>((): GroupInfo[] => {
+    const q = query.value.trim()
+    if (q == '') {
+        return groups.value
+    }
+    const result: GroupInfo[] = []
+    for (let i = 0; i < groups.value.length; i++) {
+        if (groups.value[i].name.indexOf(q) >= 0) {
+            result.push(groups.value[i])
+        }
+    }
+    return result
+})
+
+const confirmLabel = computed<string>((): string => {
+    return t('common.confirm') + (checkedIds.value.length > 0 ? '(' + checkedIds.value.length + ')' : '')
+})
+
+const portraitOf = (group: GroupInfo): string => {
+    return group.portrait != '' ? group.portrait : Config.DEFAULT_PORTRAIT_URL
+}
+
+const isChecked = (group: GroupInfo): boolean => {
+    return checkedIds.value.indexOf(group.target) >= 0
+}
+
+const toggle = (group: GroupInfo) => {
+    const index = checkedIds.value.indexOf(group.target)
+    if (index >= 0) {
+        checkedIds.value.splice(index, 1)
+    } else {
+        checkedIds.value.push(group.target)
+    }
+}
+
+const onQueryInput = (e: UniInputEvent) => {
+    query.value = e.detail.value
+}
+
+const confirm = () => {
+    const picked: GroupInfo[] = []
+    for (let i = 0; i < groups.value.length; i++) {
+        if (checkedIds.value.indexOf(groups.value[i].target) >= 0) {
+            picked.push(groups.value[i])
+        }
+    }
+    confirmed = true
+    notifyPickedGroups(picked)
+    uni.navigateBack({} as NavigateBackOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.search-bar {
+    width: 100%;
+    padding: 8px 12px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.search-box {
+    width: 100%;
+    height: 34px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border-radius: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.search-icon {
+    font-size: 15px;
+}
+
+.search-input {
+    flex: 1;
+    margin-left: 6px;
+    font-size: 14px;
+}
+
+.list {
+    flex: 1;
+}
+
+.row-item {
+    width: 100%;
+}
+
+.row {
+    width: 100%;
+    height: 60px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 15px;
+    padding-right: 15px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.portrait {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.title {
+    flex: 1;
+    margin-left: 12px;
+    font-size: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.check {
+    flex-shrink: 0;
+    font-size: 20px;
+}
+
+.footer {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+    border-top-width: 0.5px;
+    border-top-style: solid;
+}
+
+.confirm {
+    width: 100%;
+    height: 42px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background-color: #1F64E4;
+}
+</style>

@@ -1,0 +1,311 @@
+/**
+ * 网盘数据模型。对齐 flutter `chat/lib/pan/pan_service.dart` 底部的模型定义。
+ *
+ * 与 flutter 的两处差异（语义等价）：
+ * 1. 枚举写成静态常量类 —— uts 的 enum 在三端行为不一致，本项目一律用静态类
+ *    （见 wfc/moment/momentModel.uts 的说明）。
+ * 2. 可空字段统一用零值代表未设置（number 用 0、string 用 ''、bool 用 false），
+ *    解析时用 `?? 零值` 兜底，页面里不用到处判空。
+ */
+import wfc from "../wfc/client/wfc.uts";
+import { isOnlineDocName } from "./panDocUrl.uts";
+
+/** 空间类型：全局公共 / 某人的公共 / 某人的私有 */
+export class PanSpaceType {
+    static globalPublic = 0
+    static userPublic = 1
+    static userPrivate = 2
+}
+
+/** 文件类型：文件 / 文件夹 */
+export class PanFileType {
+    static file = 0
+    static folder = 1
+}
+
+/** 服务端返回的字符串空间类型 -> 本地常量；老版本是 int，见 [panSpaceFromJson] */
+export function panSpaceTypeFromString(value: string): number {
+    switch (value.toUpperCase()) {
+        case 'GLOBAL_PUBLIC':
+            return PanSpaceType.globalPublic
+        case 'USER_PUBLIC':
+            return PanSpaceType.userPublic
+        case 'USER_PRIVATE':
+            return PanSpaceType.userPrivate
+        default:
+            return PanSpaceType.globalPublic
+    }
+}
+
+/**
+ * 网盘异常：带服务端业务码与原始消息（`code > 0` 时消息可直接展示给用户，
+ * 本地/网络错误的 code ≤ 0，见 [panErrorText]）。
+ */
+export class PanException extends Error {
+    code = -1
+
+    constructor(code: number, message: string) {
+        super(message)
+        this.code = code
+    }
+
+    override toString(): string {
+        return 'PanException(' + this.code + '): ' + this.message
+    }
+}
+
+/** 失败提示：服务端给了业务码和原因时带上，本地/网络错误只显示基础文案。 */
+export function panErrorText(base: string, error: any | null): string {
+    if (error instanceof PanException) {
+        const e = error as PanException
+        if (e.code > 0 && e.message != '') {
+            return base + ': ' + e.message
+        }
+    }
+    return base
+}
+
+/** 网盘空间信息 */
+export class PanSpace {
+    spaceId = 0
+    spaceType = PanSpaceType.globalPublic
+    ownerId = ''
+    name = ''
+    totalQuota = 0
+    usedQuota = 0
+    fileCount = 0
+    folderCount = 0
+    autoInit = false
+    createdAt = ''
+    canManage = false
+
+    /** 能不能往里新建、上传、移入。别人的公共空间只读，其余以服务端校验为准。 */
+    canWrite(): boolean {
+        return this.spaceType != PanSpaceType.userPublic || this.ownerId == wfc.getUserId()
+    }
+
+    isMySpace(): boolean {
+        return this.ownerId == wfc.getUserId()
+    }
+}
+
+/** 网盘文件信息 */
+export class PanFile {
+    fileId = 0
+    spaceId = 0
+    parentId = 0
+    name = ''
+    type = PanFileType.file
+    size = 0
+    mimeType = ''
+    md5 = ''
+    storageUrl = ''
+    childCount = 0
+    versionNo = 0
+    creatorId = ''
+    creatorName = ''
+    creatorPortrait = ''
+    createdAt = ''
+    updatedAt = ''
+
+    isFolder(): boolean {
+        return this.type == PanFileType.folder
+    }
+
+    extension(): string {
+        if (this.isFolder()) {
+            return ''
+        }
+        const idx = this.name.lastIndexOf('.')
+        return idx > 0 ? this.name.substring(idx + 1).toLowerCase() : ''
+    }
+
+    canOpenOnline(): boolean {
+        return !this.isFolder() && isOnlineDocName(this.name)
+    }
+}
+
+/** 文档首页的一行：最近打开或共享给我的一个文件 */
+export class PanDocEntry {
+    file: PanFile = new PanFile()
+    /** 我对它的权限：可编辑，否则只能查看 */
+    canEdit = false
+    /** 最近打开的时间或共享的时间，服务端原样 */
+    time = ''
+    /** 共享来源（某人直接分享、经某个群），最近打开的没有 */
+    sources: PanShareSource[] = []
+}
+
+/** 文件的一条分享：分享给了谁（人或群）、什么权限 */
+export class PanShare {
+    id = 0
+    isGroup = false
+    targetId = ''
+    targetName = ''
+    canEdit = false
+    sharerName = ''
+    time = ''
+}
+
+/** 文件是怎么共享给我的 */
+export class PanShareSource {
+    isGroup = false
+    groupName = ''
+    sharerName = ''
+}
+
+/** 一个文件的历史版本 */
+export class PanFileVersion {
+    fileId = 0
+    versionNo = 0
+    size = 0
+    /** 版本来源：服务端枚举原样字符串 */
+    source = ''
+    editorId = ''
+    editorName = ''
+    current = false
+    createdAt = ''
+}
+
+/** 服务端返回的数组元素在各端可能不是 UTSJSONObject，逐个判类型（同 collectionModel）。 */
+export function jsonObjectList(value: any | null): UTSJSONObject[] {
+    const list: UTSJSONObject[] = []
+    if (value != null && value instanceof Array) {
+        const arr = value as Array<any>
+        for (let i = 0; i < arr.length; i++) {
+            const o = arr[i]
+            if (o instanceof UTSJSONObject) {
+                list.push(o as UTSJSONObject)
+            }
+        }
+    }
+    return list
+}
+
+export function panSpaceFromJson(o: UTSJSONObject): PanSpace {
+    const space = new PanSpace()
+    // 服务端 SpaceVO 是 `id`，老版本是 `spaceId`，两个都认
+    space.spaceId = o.getNumber('spaceId') ?? o.getNumber('id') ?? 0
+    // 服务端返回字符串枚举 "GLOBAL_PUBLIC"，老版本可能是 int，两种都认
+    const typeValue = o['spaceType']
+    if (typeof typeValue == 'string') {
+        space.spaceType = panSpaceTypeFromString(typeValue as string)
+    } else if (typeof typeValue == 'number') {
+        const n = Math.floor(typeValue as number)
+        space.spaceType = (n >= 0 && n <= 2) ? n : PanSpaceType.globalPublic
+    }
+    space.ownerId = o.getString('ownerId') ?? ''
+    space.name = o.getString('name') ?? ''
+    space.totalQuota = o.getNumber('totalQuota') ?? 0
+    space.usedQuota = o.getNumber('usedQuota') ?? 0
+    space.fileCount = o.getNumber('fileCount') ?? 0
+    space.folderCount = o.getNumber('folderCount') ?? 0
+    space.autoInit = o.getBoolean('autoInit') ?? false
+    space.createdAt = o.getString('createdAt') ?? ''
+    space.canManage = o.getBoolean('canManage') ?? false
+    return space
+}
+
+export function panFileFromJson(o: UTSJSONObject): PanFile {
+    const file = new PanFile()
+    // 服务端 FileVO 是 `id`，老版本是 `fileId`
+    file.fileId = o.getNumber('fileId') ?? o.getNumber('id') ?? 0
+    file.spaceId = o.getNumber('spaceId') ?? 0
+    file.parentId = o.getNumber('parentId') ?? 0
+    file.name = o.getString('name') ?? ''
+    // 服务端返回 "FOLDER" / "FILE"，老版本是 1 / 0，两种都认
+    const typeValue = o['type']
+    let isFolder = false
+    if (typeof typeValue == 'string') {
+        isFolder = (typeValue as string).toUpperCase() == 'FOLDER'
+    } else if (typeof typeValue == 'number') {
+        isFolder = (typeValue as number) == 1
+    }
+    file.type = isFolder ? PanFileType.folder : PanFileType.file
+    file.size = o.getNumber('size') ?? 0
+    file.mimeType = o.getString('mimeType') ?? ''
+    file.md5 = o.getString('md5') ?? ''
+    file.storageUrl = o.getString('storageUrl') ?? ''
+    file.childCount = o.getNumber('childCount') ?? 0
+    file.versionNo = o.getNumber('versionNo') ?? 0
+    file.creatorId = o.getString('creatorId') ?? ''
+    file.creatorName = o.getString('creatorName') ?? ''
+    file.creatorPortrait = o.getString('creatorPortrait') ?? ''
+    file.createdAt = o.getString('createdAt') ?? ''
+    file.updatedAt = o.getString('updatedAt') ?? ''
+    return file
+}
+
+export function panShareFromJson(o: UTSJSONObject): PanShare {
+    const share = new PanShare()
+    share.id = o.getNumber('id') ?? 0
+    share.isGroup = (o.getString('targetType') ?? '') == 'GROUP'
+    share.targetId = o.getString('targetId') ?? ''
+    share.targetName = o.getString('targetName') ?? ''
+    share.canEdit = (o.getString('permission') ?? '') == 'EDIT'
+    share.sharerName = o.getString('createdByName') ?? ''
+    share.time = o.getString('createdAt') ?? ''
+    return share
+}
+
+export function panFileVersionFromJson(o: UTSJSONObject): PanFileVersion {
+    const version = new PanFileVersion()
+    version.fileId = o.getNumber('fileId') ?? 0
+    version.versionNo = o.getNumber('versionNo') ?? 0
+    version.size = o.getNumber('size') ?? 0
+    version.source = o.getString('source') ?? ''
+    version.editorId = o.getString('editorId') ?? ''
+    version.editorName = o.getString('editorName') ?? ''
+    version.current = o.getBoolean('current') ?? false
+    version.createdAt = o.getString('createdAt') ?? ''
+    return version
+}
+
+/** 最近打开的一条：`{file, permission, openedAt}` */
+export function panRecentDocFromJson(o: UTSJSONObject): PanDocEntry {
+    const entry = new PanDocEntry()
+    const fileJson = o.getJSON('file')
+    if (fileJson != null) {
+        entry.file = panFileFromJson(fileJson)
+    }
+    entry.canEdit = (o.getString('permission') ?? '') == 'EDIT'
+    entry.time = o.getString('openedAt') ?? ''
+    return entry
+}
+
+/** 共享给我的一条：`{file, permission, sources:[...], sharedAt}` */
+export function panSharedDocFromJson(o: UTSJSONObject): PanDocEntry {
+    const entry = new PanDocEntry()
+    const fileJson = o.getJSON('file')
+    if (fileJson != null) {
+        entry.file = panFileFromJson(fileJson)
+    }
+    entry.canEdit = (o.getString('permission') ?? '') == 'EDIT'
+    entry.time = o.getString('sharedAt') ?? ''
+    const sources: PanShareSource[] = []
+    const sourceJsons = jsonObjectList(o['sources'])
+    for (let i = 0; i < sourceJsons.length; i++) {
+        const s = sourceJsons[i]
+        const source = new PanShareSource()
+        source.isGroup = (s.getString('targetType') ?? '') == 'GROUP'
+        source.groupName = s.getString('targetName') ?? ''
+        source.sharerName = s.getString('createdByName') ?? ''
+        sources.push(source)
+    }
+    entry.sources = sources
+    return entry
+}
+
+/** 以带一位小数的形式格式化字节数（网盘展示风格，如 '1.5 GB'）。 */
+export function formatPanSize(bytes: number): string {
+    if (bytes >= 1073741824) {
+        return (bytes / 1073741824).toFixed(1) + ' GB'
+    }
+    if (bytes >= 1048576) {
+        return (bytes / 1048576).toFixed(1) + ' MB'
+    }
+    if (bytes >= 1024) {
+        return (bytes / 1024).toFixed(1) + ' KB'
+    }
+    return '' + bytes + ' B'
+}

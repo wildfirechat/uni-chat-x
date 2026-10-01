@@ -13,6 +13,7 @@
 import Message from "@/wfc/messages/message.uts";
 import FileMessageContent from "@/wfc/messages/fileMessageContent.uts";
 import { humanSize, getFiletypeIcon } from "@/pages/util/helper.uts";
+import { openFileByDefault } from "@/common/panFileOpen.uts";
 
 import { colors, AppColors } from "@/common/theme.uts";
 import { fontPx } from "@/common/layoutScale.uts";
@@ -46,29 +47,8 @@ const fileIcon = computed<string>((): string => {
 })
 
 const clickFile = () => {
-    uni.downloadFile({
-        url: content.value.remotePath,
-        success: (res) => {
-            const filePath = res.tempFilePath;
-            console.log('download file success', filePath);
-            uni.openDocument({
-                filePath: filePath,
-                success: (_) => {
-                    console.log('打开文档成功');
-                },
-                fail: (err) => {
-                    console.log('打开文档失败', err);
-                    uni.showToast({
-                        title: '打开文档失败',
-                        icon: 'none',
-                    } as ShowToastOptions);
-                }
-            } as OpenDocumentOptions);
-        },
-        fail: (err) => {
-            console.log('download file fail', err);
-        }
-    } as DownloadFileOptions);
+    // 文档格式在配置了网盘时走在线只读预览；其余（或未配置网盘）保持原系统打开
+    openFileByDefault(content.value.name, content.value.remotePath)
 }
 </script>
 

@@ -1,0 +1,211 @@
+/**
+ * 在线文档 H5 页的桥服务端（uni-app x）。对齐服务端 `doc-web/app.js` 的 postMessage 协议
+ * （`/Users/rain/Workspace/wf-pan/docs/doc-web-bridge.md` 第 2 节）：
+ *
+ * 页面 -> 宿主：`{__panBridge:true, type:'call'|'listen', id, method, data}`
+ * 宿主 -> 页面：回复 `{__panBridge:true, type:'reply', id, code, data}`
+ *               通知 `{__panBridge:true, type:'notify', method, data}`
+ *
+ * 认证码不走消息：宿主把它拼进页面 URL 的 fragment（`#panAuthCode=...`，见 PanDocWebViewPage），
+ * 页面读完立即抹掉。这里仍实现 `getAuthCode` 以兼容老页面。
+ *
+ * 宿主结构与 `pages/workspace/bridgeServerImpl.uts` 一致：页面消息由 web-view 的 @message
+ * （uni.postMessage）上来，回包用 `webviewContext.evalJS` 注入 `window.postMessage`。
+ */
+import wfc from "../../wfc/client/wfc.uts";
+import UserInfo from "../../wfc/model/userInfo.uts";
+import GroupInfo from "../../wfc/model/groupInfo.uts";
+import { extractHost } from "../../api/authCodeApiClient.uts";
+import { pickUsers, PickUsersOptions, pickGroups, PickGroupsOptions } from "../../common/picker.uts";
+import { navigateToPage } from "../../common/nav.uts";
+import { downloadAndOpen } from "../../common/panFileOpen.uts";
+
+export class PanDocBridge {
+    private webviewContext: WebviewContext | null = null
+    private appUrl = ''
+
+    init(webviewContext: WebviewContext | null, appUrl: string): void {
+        this.webviewContext = webviewContext
+        this.appUrl = appUrl
+    }
+
+    messageFromWebView(data: string): void {
+        const obj = JSON.parseObject(data)
+        if (obj == null) {
+            return
+        }
+        // 页面只认带 __panBridge 的消息，避免误处理工作台协议的报文
+        const isPanBridge = obj.getBoolean('__panBridge') ?? false
+        if (!isPanBridge) {
+            return
+        }
+        const type = obj.getString('type') ?? ''
+        const method = obj.getString('method') ?? ''
+        const data = obj['data']
+        if (type == 'listen') {
+            // setPageHeader 在网页模式下由页面自绘，不需要客户端处理；其余 listen 忽略
+            return
+        }
+        if (type != 'call') {
+            return
+        }
+        const id = obj.getNumber('id') ?? 0
+        switch (method) {
+            case 'getAuthCode':
+                this.getAuthCode(data, id)
+                break
+            case 'downloadFile':
+                this.downloadFile(data, id)
+                break
+            case 'openUrl':
+                this.openUrl(data, id)
+                break
+            case 'chooseContacts':
+                this.chooseContacts(id)
+                break
+            case 'chooseGroup':
+                this.chooseGroup(id)
+                break
+            case 'toast':
+                this.toast(data, id)
+                break
+            case 'close':
+                this.close(id)
+                break
+            default:
+                this.reply(id, -1, null)
+                break
+        }
+    }
+
+    private getAuthCode(data: any | null, id: number): void {
+        let appId = 'admin'
+        let appType = 2
+        if (data instanceof UTSJSONObject) {
+            const args = data as UTSJSONObject
+            appId = args.getString('appId') ?? appId
+            appType = args.getNumber('appType') ?? appType
+        }
+        wfc.getAuthCode(appId, appType, extractHost(this.appUrl), (authCode: string) => {
+            this.reply(id, 0, authCode)
+        }, (err: number) => {
+            this.reply(id, err, null)
+        })
+    }
+
+    private downloadFile(data: any | null, id: number): void {
+        const url = this.urlOf(data)
+        if (url != '') {
+            downloadAndOpen(url)
+        }
+        this.reply(id, url != '' ? 0 : -1, null)
+    }
+
+    private openUrl(data: any | null, id: number): void {
+        const url = this.urlOf(data)
+        if (url != '') {
+            navigateToPage(`/pages/pan/PanDocWebViewPage?url=${encodeURIComponent(url)}`, null)
+        }
+        this.reply(id, url != '' ? 0 : -1, null)
+    }
+
+    private chooseContacts(id: number): void {
+        const options = new PickUsersOptions()
+        options.users = []
+        options.confirmTitle = '确定'
+        options.successCB = (users: UserInfo[]) => {
+            const list: UTSJSONObject[] = []
+            for (let i = 0; i < users.length; i++) {
+                list.push({
+                    uid: users[i].uid,
+                    name: users[i].name,
+                    displayName: users[i].displayName,
+                    portrait: users[i].portrait
+                } as UTSJSONObject)
+            }
+            this.reply(id, 0, JSON.stringify(list)!)
+        }
+        pickUsers(options)
+    }
+
+    private chooseGroup(id: number): void {
+        const options = new PickGroupsOptions()
+        options.confirmTitle = '确定'
+        options.successCB = (groups: GroupInfo[]) => {
+            if (groups.length == 0) {
+                // 用户取消：回 -1，H5 的 Promise 不能悬空
+                this.reply(id, -1, null)
+                return
+            }
+            const list: UTSJSONObject[] = []
+            for (let i = 0; i < groups.length; i++) {
+                list.push({
+                    gid: groups[i].target,
+                    name: groups[i].name,
+                    portrait: groups[i].portrait
+                } as UTSJSONObject)
+            }
+            this.reply(id, 0, JSON.stringify(list)!)
+        }
+        pickGroups(options)
+    }
+
+    private toast(data: any | null, id: number): void {
+        uni.showToast({
+            title: data != null ? '' + data : '',
+            icon: 'none'
+        } as ShowToastOptions)
+        this.reply(id, 0, null)
+    }
+
+    private close(id: number): void {
+        this.reply(id, 0, null)
+        uni.navigateBack({
+            delta: 1,
+            fail: (err) => {
+                console.log('nav back err', err)
+            }
+        } as NavigateBackOptions)
+    }
+
+    private urlOf(data: any | null): string {
+        if (data == null) {
+            return ''
+        }
+        if (data instanceof UTSJSONObject) {
+            const obj = data as UTSJSONObject
+            return obj.getString('url') ?? ''
+        }
+        if (typeof data == 'string') {
+            return data as string
+        }
+        return '' + data
+    }
+
+    private reply(id: number, code: number, data: any | null): void {
+        const obj = {
+            __panBridge: true,
+            type: 'reply',
+            id: id,
+            code: code,
+            data: data
+        } as UTSJSONObject
+        this.postToPage(obj)
+    }
+
+    private notify(method: string, data: any | null): void {
+        const obj = {
+            __panBridge: true,
+            type: 'notify',
+            method: method,
+            data: data
+        } as UTSJSONObject
+        this.postToPage(obj)
+    }
+
+    private postToPage(obj: UTSJSONObject): void {
+        const str = JSON.stringify(obj)!
+        // 页面在 window 上监听 message 事件；把结构化数据 post 回自身即可
+        this.webviewContext?.evalJS(`window.postMessage(${str}, '*')`)
+    }
+}

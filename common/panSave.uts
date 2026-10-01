@@ -1,0 +1,54 @@
+/**
+ * 把消息里的文件保存进「我的网盘」。对齐 flutter `pan/pan_save.dart`。
+ *
+ * 物理文件的拷贝由服务端做（`saveFileToMyPan` 走 `copy:true`）：消息里的文件在公开读的
+ * 媒体桶里，不拷进网盘 bucket 的话网盘的权限与分享就形同虚设。
+ */
+import Config from "../config.uts";
+import panServerApi from "../api/panServerApi.uts";
+import { PanFile, panErrorText } from "../api/panModel.uts";
+import { t } from "../i18n/i18n.uts";
+import { redirectMediaUrl } from "./mediaUrlRedirector.uts";
+import { downloadAndOpen, openOnlineDoc } from "./panFileOpen.uts";
+
+function toast(title: string): void {
+    uni.showToast({
+        title: title,
+        icon: 'none'
+    } as ShowToastOptions)
+}
+
+/**
+ * [openAfterSave] 为 true 时保存完接着打开：能在线打开的格式走在线文档；
+ * 其余格式取签名地址交给系统打开（与在网盘里点它一致）。
+ */
+export function saveFileMessageToMyPan(name: string, size: number, storageUrl: string,
+    mimeType: string = '', openAfterSave: boolean = false): void {
+    if (!Config.isPanEnabled()) {
+        return
+    }
+    panServerApi.saveFileToMyPan(name, size, redirectMediaUrl(storageUrl), mimeType)
+        .then((file: PanFile): void => {
+            toast(t('pan.save_to_my_pan_success'))
+            if (!openAfterSave) {
+                return
+            }
+            if (file.canOpenOnline()) {
+                openOnlineDoc(file.fileId)
+                return
+            }
+            panServerApi.getFileDownloadUrl(file.fileId)
+                .then((url: string): void => {
+                    if (url != '') {
+                        downloadAndOpen(url)
+                    }
+                })
+                .catch((err: any | null): void => {
+                    toast(panErrorText(t('pan.get_download_url_failed'), err))
+                })
+        })
+        .catch((err: any | null): void => {
+            console.log('save file to pan error', err)
+            toast(panErrorText(t('pan.save_to_my_pan_failed'), err))
+        })
+}

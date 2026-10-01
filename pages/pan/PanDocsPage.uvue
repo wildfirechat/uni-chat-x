@@ -1,0 +1,307 @@
+<template>
+    <view class="page" :style="{ backgroundColor: c.primaryBackground }">
+        <!-- 页签：最近打开 / 共享给我 -->
+        <view class="tabs" :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+            <view class="tab" @tap="switchTab(0)">
+                <text class="tab-label" :style="{ color: tab == 0 ? c.accent : c.textSecondary, fontSize: fontPx(FONT_LG) }">{{ t('pan.recent') }}</text>
+                <view v-if="tab == 0" class="tab-underline" :style="{ backgroundColor: c.accent }"></view>
+            </view>
+            <view class="tab" @tap="switchTab(1)">
+                <text class="tab-label" :style="{ color: tab == 1 ? c.accent : c.textSecondary, fontSize: fontPx(FONT_LG) }">{{ t('pan.shared_with_me') }}</text>
+                <view v-if="tab == 1" class="tab-underline" :style="{ backgroundColor: c.accent }"></view>
+            </view>
+            <view v-if="canCreate" class="new-doc" :hover-class="pressedClass" hover-stay-time="80" @tap="showCreateMenu">
+                <text class="icomoon" :style="{ color: c.accent, fontSize: iconPx(22) }">&#xf218;</text>
+            </view>
+        </view>
+
+        <scroll-view class="list" direction="vertical">
+            <view v-for="entry in entries" :key="entry.file.fileId" class="row" :hover-class="pressedClass"
+                hover-stay-time="80" @tap="openEntry(entry)"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <image class="file-icon" :src="panFileIcon(entry.file)" mode="aspectFill" />
+                <view class="row-texts">
+                    <text class="row-title" :style="{ color: c.textPrimary, fontSize: fontPx(FONT_LG) }">{{ entry.file.name }}</text>
+                    <text class="row-sub" :style="{ color: c.textTertiary, fontSize: fontPx(FONT_XS) }">{{ subtitle(entry) }}</text>
+                </view>
+                <text v-if="tab == 0" class="icomoon more" :style="{ color: c.textTertiary, fontSize: iconPx(20) }"
+                    @tap.stop="removeRecent(entry)">&#xf252;</text>
+            </view>
+
+            <view v-if="loading" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ t('common.loading') }}</text>
+            </view>
+            <view v-else-if="failed" class="status" @tap="load">
+                <text :style="{ color: c.textSecondary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.load_failed') }}</text>
+                <text :style="{ color: c.accent, fontSize: fontPx(FONT_BASE) }">{{ t('pan.retry') }}</text>
+            </view>
+            <view v-else-if="entries.length == 0" class="status">
+                <text :style="{ color: c.textTertiary, fontSize: fontPx(FONT_BASE) }">{{ tab == 0 ? t('pan.recent_empty') : t('pan.shared_empty') }}</text>
+            </view>
+
+            <!-- 编辑引擎是 AGPL，留一个开源许可入口 -->
+            <view class="row" :hover-class="pressedClass" hover-stay-time="80" @tap="openLicenses"
+                :style="{ backgroundColor: c.surface, borderBottomColor: c.hairlineSoft }">
+                <text class="icomoon gap-icon" :style="{ color: c.textSecondary, fontSize: iconPx(22) }">&#xf12e;</text>
+                <text class="row-title" :style="{ color: c.textSecondary, fontSize: fontPx(FONT_BASE) }">{{ t('pan.licenses') }}</text>
+            </view>
+        </scroll-view>
+
+        <bottom-action-sheet v-model="createSheetVisible" :items="createItems" @select="onCreateSelect" />
+        <watermark-overlay />
+    </view>
+</template>
+
+<script setup lang="uts">
+/**
+ * 在线文档首页：最近打开 / 共享给我，可新建 Word/Excel/PPT。
+ * 对齐 flutter `pan/pan_docs_screen.dart` 的移动分支。列表和操作是原生的，点开才进内置文档网页。
+ */
+import Config from "@/config.uts";
+import panServerApi from "@/api/panServerApi.uts";
+import { PanDocEntry, PanFile, panErrorText } from "@/api/panModel.uts";
+import { docOpenUrl, docLicensesUrl } from "@/api/panDocUrl.uts";
+import { openDocPage } from "@/common/panFileOpen.uts";
+import { ActionSheetItem } from "@/components/bottom-action-sheet/actionSheetItem.uts";
+import { colors, AppColors, pressedRowClass } from "@/common/theme.uts";
+import { fontPx, iconPx, FONT_XS, FONT_BASE, FONT_LG } from "@/common/layoutScale.uts";
+import { t } from "@/i18n/i18n.uts";
+import { panFileIcon, panTimeText } from "./panUi.uts";
+
+defineOptions({
+    name: "PanDocsPage"
+})
+
+const c = computed<AppColors>((): AppColors => colors())
+const pressedClass = computed<string>((): string => pressedRowClass())
+
+const tab = ref<number>(0)
+const recent = ref<PanDocEntry[]>([] as PanDocEntry[])
+const shared = ref<PanDocEntry[]>([] as PanDocEntry[])
+const loading = ref<boolean>(true)
+const failed = ref<boolean>(false)
+const canCreate = ref<boolean>(false)
+
+const createSheetVisible = ref<boolean>(false)
+const createItems = ref<ActionSheetItem[]>([
+    new ActionSheetItem(t('pan.new_word'), 'docx'),
+    new ActionSheetItem(t('pan.new_cell'), 'xlsx'),
+    new ActionSheetItem(t('pan.new_slide'), 'pptx')
+] as ActionSheetItem[])
+
+const entries = computed<PanDocEntry[]>((): PanDocEntry[] => tab.value == 0 ? recent.value : shared.value)
+
+onLoad((_options: OnLoadOptions) => {
+    panServerApi.isMobileDocEditEnabled()
+        .then((enabled: boolean): void => {
+            canCreate.value = enabled
+        })
+        .catch((_err: any | null): void => {
+        })
+})
+
+onShow(() => {
+    load()
+})
+
+const load = () => {
+    if (!Config.isPanEnabled()) {
+        loading.value = false
+        failed.value = true
+        return
+    }
+    loading.value = entries.value.length == 0
+    failed.value = false
+    if (tab.value == 0) {
+        panServerApi.getRecentDocs()
+            .then((list: PanDocEntry[]): void => {
+                recent.value = list
+                loading.value = false
+            })
+            .catch((_err: any | null): void => {
+                loading.value = false
+                failed.value = recent.value.length == 0
+            })
+    } else {
+        panServerApi.getSharedWithMe()
+            .then((list: PanDocEntry[]): void => {
+                shared.value = list
+                loading.value = false
+            })
+            .catch((_err: any | null): void => {
+                loading.value = false
+                failed.value = shared.value.length == 0
+            })
+    }
+}
+
+const switchTab = (index: number) => {
+    if (tab.value == index) {
+        return
+    }
+    tab.value = index
+    load()
+}
+
+const subtitle = (entry: PanDocEntry): string => {
+    const permission = entry.canEdit ? t('pan.can_edit') : t('pan.can_view')
+    if (tab.value == 0) {
+        const time = panTimeText(entry.time)
+        return time != '' ? permission + '  ·  ' + time : permission
+    }
+    let source = ''
+    if (entry.sources.length > 0) {
+        const s = entry.sources[0]
+        source = s.isGroup ? s.groupName : s.sharerName
+    }
+    return source != '' ? permission + '  ·  ' + source : permission
+}
+
+const openEntry = (entry: PanDocEntry) => {
+    openDocPage(docOpenUrl(entry.file.fileId))
+}
+
+const openLicenses = () => {
+    openDocPage(docLicensesUrl())
+}
+
+const removeRecent = (entry: PanDocEntry) => {
+    panServerApi.removeRecentDoc(entry.file.fileId)
+        .then((_res: UTSJSONObject | null): void => {
+            load()
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.remove_failed'), err))
+        })
+}
+
+const showCreateMenu = () => {
+    createSheetVisible.value = true
+}
+
+const onCreateSelect = (tag: string) => {
+    panServerApi.createDoc(tag)
+        .then((file: PanFile): void => {
+            openDocPage(docOpenUrl(file.fileId))
+        })
+        .catch((err: any | null): void => {
+            toast(panErrorText(t('pan.create_failed'), err))
+        })
+}
+
+function toast(title: string): void {
+    uni.showToast({ title: title, icon: 'none' } as ShowToastOptions)
+}
+</script>
+
+<style scoped>
+.page {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.tabs {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0 8px 0;
+}
+
+.tab-label {
+    flex-shrink: 0;
+}
+
+.tab-underline {
+    width: 28px;
+    height: 2px;
+    margin-top: 6px;
+    border-radius: 1px;
+}
+
+.new-doc {
+    width: 48px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.icomoon {
+    font-family: "icomoon";
+}
+
+.list {
+    flex: 1;
+}
+
+.row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px 10px 14px;
+    border-bottom-width: 0.5px;
+    border-bottom-style: solid;
+}
+
+.file-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.gap-icon {
+    width: 38px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.row-texts {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin-left: 12px;
+    overflow: hidden;
+}
+
+.row-title {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.row-sub {
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.more {
+    flex-shrink: 0;
+    padding: 4px 6px;
+}
+
+.status {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 0;
+}
+</style>
